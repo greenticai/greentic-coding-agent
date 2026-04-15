@@ -1,0 +1,28 @@
+catalog = {
+  version: text,
+  generated_at: text,
+  repos: [* catalog-repo],
+}
+
+catalog-repo = {
+  repo_name: text,
+  repo_role: repo-role,
+  latest_tag: text,
+  package_ref: text,
+  updated_at: text,
+}
+
+repo-role = &(
+  core_contracts: "core_contracts",
+  cli_launcher: "cli_launcher",
+  component_authoring: "component_authoring",
+  flow_authoring: "flow_authoring",
+  pack_authoring: "pack_authoring",
+  bundle_assembly: "bundle_assembly",
+  solution_layer: "solution_layer",
+  sorla_layer: "sorla_layer",
+  provider_family: "provider_family",
+  demo_app: "demo_app",
+  customer_solution: "customer_solution",
+  examples_only: "examples_only",
+)

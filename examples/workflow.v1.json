@@ -1,0 +1,17 @@
+{
+  "id": "analyze_repo",
+  "title": "Analyze repo",
+  "summary": "Bootstrap repo-local coding-agent knowledge for the current checkout.",
+  "phase": "build",
+  "commands": [
+    "gtc dev coding-agent analyze"
+  ],
+  "docs": [
+    "README.md",
+    ".codex/PR-03-local-registry-and-analyze-bootstrap.md"
+  ],
+  "concept_ids": [
+    "digital_worker",
+    "setup"
+  ]
+}

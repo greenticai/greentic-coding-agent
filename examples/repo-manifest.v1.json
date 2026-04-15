@@ -1,0 +1,17 @@
+{
+  "version": "v1",
+  "repo_name": "greentic-coding-agent",
+  "repo_root": "/workspace/greentic-coding-agent",
+  "repo_role": "cli_launcher",
+  "primary_language": "rust",
+  "generated_at": "2026-04-15T00:00:00Z",
+  "candidate_docs": [
+    "README.md",
+    "docs/architecture.md"
+  ],
+  "cargo_manifests": [
+    "Cargo.toml",
+    "crates/gca-cli/Cargo.toml",
+    "crates/gca-core/Cargo.toml"
+  ]
+}

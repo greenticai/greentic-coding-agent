@@ -1,0 +1,50 @@
+name: Greentic Agent Index
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Analyze repo
+        run: cargo run --package greentic-coding-agent -- analyze --print --format json | tee .greentic-agent-analyze.json
+
+      - name: Check refresh
+        run: cargo run --package greentic-coding-agent -- check-refresh --format json | tee .greentic-agent-refresh.json
+
+      - name: Package index
+        run: cargo run --package greentic-coding-agent -- package-index --tag latest --format json | tee .greentic-agent-package.json
+
+      - name: Publish index when refresh is needed
+        shell: bash
+        run: |
+          if cargo run --package greentic-coding-agent -- check-refresh --format json | grep -q '"needs_refresh": true'; then
+            cargo run --package greentic-coding-agent -- publish-index --tag latest --format json | tee .greentic-agent-publish.json
+          else
+            echo '{"published": false, "reason": "refresh not required"}' | tee .greentic-agent-publish.json
+          fi
+
+      - name: Upload summaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: greentic-agent-index-summary
+          path: |
+            .greentic-agent-analyze.json
+            .greentic-agent-refresh.json
+            .greentic-agent-package.json
+            .greentic-agent-publish.json

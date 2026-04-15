@@ -1,0 +1,14 @@
+{
+  "id": "digital_worker",
+  "title": "Digital worker",
+  "summary": "A built-in Greentic concept used across runtime and orchestration flows.",
+  "scope": "cross_repo",
+  "lifecycle_phase": "runtime",
+  "owners": [
+    "greentic-types",
+    "greentic-coding-agent"
+  ],
+  "related_paths": [
+    "docs/architecture.md"
+  ]
+}

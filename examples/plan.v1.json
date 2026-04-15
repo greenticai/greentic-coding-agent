@@ -1,0 +1,8 @@
+{
+  "summary": "Update wizard setup schema and improve bundle start validation",
+  "steps": [
+    "refresh indexed repo knowledge",
+    "check owner hints before changing shared setup flows",
+    "run required validations"
+  ]
+}

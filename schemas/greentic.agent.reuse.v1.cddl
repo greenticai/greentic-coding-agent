@@ -1,0 +1,8 @@
+reuse-descriptor = {
+  id: text,
+  concept_id: text,
+  owner_repo: text,
+  rationale: text,
+  forbidden_locations: [* text],
+  required_validations: [* text],
+}

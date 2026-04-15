@@ -1,0 +1,16 @@
+[package]
+name = "gca-agent-files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+
+[dependencies]
+gca-core = { path = "../gca-core" }
+gca-query = { path = "../gca-query" }
+
+[dev-dependencies]
+tempfile = "3.13"

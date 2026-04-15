@@ -1,0 +1,18 @@
+validation-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  phase: lifecycle-phase,
+  command_groups: [* text],
+  triggered_by: [* text],
+}
+
+lifecycle-phase = &(
+  design: "design",
+  build: "build",
+  setup: "setup",
+  start: "start",
+  runtime: "runtime",
+  update: "update",
+  remove: "remove",
+)

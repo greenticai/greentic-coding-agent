@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "global": {
+    "line_coverage_min": 60.0
+  },
+  "defaults": {
+    "per_file_line_coverage_min": 60.0
+  },
+  "exclusions": {
+    "files": [
+      "crates/gca-cli/src/main.rs",
+      "crates/gca-agent-files/src/lib.rs",
+      "crates/gca-greentic/src/lib.rs",
+      "crates/gca-index/src/lib.rs",
+      "crates/gca-mcp/src/lib.rs",
+      "crates/gca-oci/src/lib.rs",
+      "crates/gca-query/src/lib.rs"
+    ]
+  },
+  "per_file": {
+    "crates/gca-core/src/lib.rs": {
+      "line_coverage_min": 80.0
+    }
+  }
+}

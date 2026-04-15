@@ -1,0 +1,172 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - id: version
+        name: Derive release version
+        shell: bash
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; metadata=json.load(sys.stdin); packages=metadata["packages"]; package=next(pkg for pkg in packages if pkg["name"] == "greentic-coding-agent"); print(package["version"])')"
+          tag="v${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "${tag}" ]; then
+            printf 'tag mismatch: expected %s but got %s\n' "${tag}" "${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+      - name: Run full verification
+        run: bash ci/local_check.sh
+
+  publish-crates:
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Publish crates to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          bash ci/local_check.sh --mode package
+          for attempt in 1 2 3; do
+            if cargo publish -p greentic-coding-agent --locked; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              printf 'cargo publish failed after %s attempts\n' "${attempt}" >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+  binstall-build:
+    needs:
+      - verify
+      - publish-crates
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    env:
+      CRATE_NAME: greentic-coding-agent
+      RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package unix artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          archive="${CRATE_NAME}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          tar -C "target/${{ matrix.target }}/release" -czf "dist/${archive}" "${CRATE_NAME}"
+          shasum -a 256 "dist/${archive}" > "dist/${archive}.sha256"
+      - name: Package windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $archive = "$env:CRATE_NAME-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/$env:CRATE_NAME.exe" -DestinationPath "dist/$archive" -Force
+          Get-FileHash "dist/$archive" -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLower())  $archive" | Out-File -FilePath "dist/$archive.sha256" -Encoding ascii
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: dist/*
+
+  publish-ghcr:
+    runs-on: ubuntu-latest
+    needs:
+      - verify
+      - binstall-build
+    env:
+      OCI_REF: ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write OCI manifest metadata
+        shell: bash
+        run: |
+          cat > dist/release-manifest.json <<EOF
+          {
+            "name": "greentic-coding-agent",
+            "version": "${{ needs.verify.outputs.version }}",
+            "tag": "${{ needs.verify.outputs.tag }}",
+            "repository": "${{ github.repository }}"
+          }
+          EOF
+      - uses: oras-project/setup-oras@v1
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Push OCI release bundle
+        shell: bash
+        run: |
+          files=()
+          while IFS= read -r file; do
+            files+=("${file}:application/octet-stream")
+          done < <(find dist -type f ! -name 'release-manifest.json' | sort)
+          oras push "${OCI_REF}" \
+            --artifact-type application/vnd.greentic.coding-agent.release.v1+json \
+            dist/release-manifest.json:application/json \
+            "${files[@]}"

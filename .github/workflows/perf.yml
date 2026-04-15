@@ -1,0 +1,20 @@
+name: Perf (lightweight)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run perf guard tests
+        run: cargo test -p gca-core --test perf_scaling --test perf_timeout
+      - name: Run Criterion smoke benchmark
+        run: cargo bench -p gca-core --bench perf -- --sample-size 10

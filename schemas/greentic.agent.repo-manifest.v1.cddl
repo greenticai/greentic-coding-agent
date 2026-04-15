@@ -1,0 +1,25 @@
+repo-agent-manifest = {
+  version: text,
+  repo_name: text,
+  repo_root: text,
+  repo_role: repo-role,
+  primary_language: text,
+  generated_at: text,
+  candidate_docs: [* text],
+  cargo_manifests: [* text],
+}
+
+repo-role = &(
+  core_contracts: "core_contracts",
+  cli_launcher: "cli_launcher",
+  component_authoring: "component_authoring",
+  flow_authoring: "flow_authoring",
+  pack_authoring: "pack_authoring",
+  bundle_assembly: "bundle_assembly",
+  solution_layer: "solution_layer",
+  sorla_layer: "sorla_layer",
+  provider_family: "provider_family",
+  demo_app: "demo_app",
+  customer_solution: "customer_solution",
+  examples_only: "examples_only",
+)

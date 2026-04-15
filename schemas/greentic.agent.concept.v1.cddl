@@ -1,0 +1,26 @@
+concept-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  scope: knowledge-scope,
+  lifecycle_phase: lifecycle-phase,
+  owners: [* text],
+  related_paths: [* text],
+}
+
+knowledge-scope = &(
+  local_repo: "local_repo",
+  workspace: "workspace",
+  cross_repo: "cross_repo",
+  published_catalog: "published_catalog",
+)
+
+lifecycle-phase = &(
+  design: "design",
+  build: "build",
+  setup: "setup",
+  start: "start",
+  runtime: "runtime",
+  update: "update",
+  remove: "remove",
+)

@@ -1,0 +1,13 @@
+{
+  "id": "extension_pack_owner",
+  "concept_id": "extension_pack",
+  "owner_repo": "greentic-pack",
+  "rationale": "Pack-level extension schema changes should live with pack contracts instead of being duplicated elsewhere.",
+  "forbidden_locations": [
+    "customer-solution",
+    "demo-app"
+  ],
+  "required_validations": [
+    "cargo test --workspace --all-features"
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "version": "v1",
+  "repo_name": "greentic-coding-agent",
+  "repo_role": "cli_launcher",
+  "generated_at": "2026-04-15T00:00:00Z",
+  "freshness": "fresh",
+  "manifest": {
+    "version": "v1",
+    "repo_name": "greentic-coding-agent",
+    "repo_root": "/workspace/greentic-coding-agent",
+    "repo_role": "cli_launcher",
+    "primary_language": "rust",
+    "generated_at": "2026-04-15T00:00:00Z",
+    "candidate_docs": [
+      "README.md",
+      "docs/architecture.md"
+    ],
+    "cargo_manifests": [
+      "Cargo.toml",
+      "crates/gca-cli/Cargo.toml",
+      "crates/gca-core/Cargo.toml"
+    ]
+  },
+  "concept_graph": [
+    {
+      "id": "digital_worker",
+      "title": "Digital worker",
+      "summary": "A built-in Greentic concept used across runtime and orchestration flows.",
+      "scope": "cross_repo",
+      "lifecycle_phase": "runtime",
+      "owners": [
+        "greentic-types",
+        "greentic-coding-agent"
+      ],
+      "related_paths": [
+        "docs/architecture.md"
+      ]
+    }
+  ],
+  "workflow_graph": [
+    {
+      "id": "analyze_repo",
+      "title": "Analyze repo",
+      "summary": "Bootstrap repo-local coding-agent knowledge for the current checkout.",
+      "phase": "build",
+      "commands": [
+        "gtc dev coding-agent analyze"
+      ],
+      "docs": [
+        "README.md",
+        ".codex/PR-03-local-registry-and-analyze-bootstrap.md"
+      ],
+      "concept_ids": [
+        "digital_worker",
+        "setup"
+      ]
+    }
+  ],
+  "validations": [
+    {
+      "id": "workspace_checks",
+      "title": "Workspace checks",
+      "summary": "Run standard Rust validation before finishing coding-agent changes.",
+      "phase": "build",
+      "command_groups": [
+        "cargo test --workspace --all-features",
+        "bash ci/local_check.sh"
+      ],
+      "triggered_by": [
+        "schema_change",
+        "core_contract_change"
+      ]
+    }
+  ],
+  "reuse": [
+    {
+      "id": "extension_pack_owner",
+      "concept_id": "extension_pack",
+      "owner_repo": "greentic-pack",
+      "rationale": "Pack-level extension schema changes should live with pack contracts instead of being duplicated elsewhere.",
+      "forbidden_locations": [
+        "customer-solution",
+        "demo-app"
+      ],
+      "required_validations": [
+        "cargo test --workspace --all-features"
+      ]
+    }
+  ],
+  "instruction_graph": [
+    {
+      "id": "architecture",
+      "path": "docs/architecture.md",
+      "title": "Architecture",
+      "kind": "doc",
+      "headings": [
+        "Goals",
+        "CLI surface"
+      ],
+      "commands": [
+        "gtc dev coding-agent analyze",
+        "gtc dev coding-agent workflows"
+      ],
+      "concept_ids": [
+        "digital_worker",
+        "greentic_x"
+      ]
+    }
+  ],
+  "instruction_paths": [
+    ".codex/PR-02-canonical-schemas-and-domain-types.md",
+    "docs/architecture.md"
+  ],
+  "source_stats": {
+    "workspace_members": [
+      "crates/gca-cli",
+      "crates/gca-core",
+      "crates/gca-index"
+    ],
+    "crate_names": [
+      "greentic-coding-agent",
+      "gca-core",
+      "gca-index"
+    ],
+    "modules": [
+      "crates/gca-core/src/model.rs",
+      "crates/gca-index/src/lib.rs"
+    ],
+    "public_items": [
+      "pub struct RepoIndex",
+      "pub fn analyze_repo"
+    ],
+    "test_targets": [
+      "crates/gca-core/tests/examples.rs",
+      "crates/gca-cli/tests/cli.rs"
+    ],
+    "feature_names": [],
+    "dependencies": [
+      "clap",
+      "serde",
+      "serde_json"
+    ],
+    "markdown_docs": [
+      "README.md",
+      "docs/architecture.md",
+      ".codex/PR-04-rust-doc-and-greentic-enrichment-indexers.md"
+    ],
+    "workflow_files": [
+      ".github/workflows/ci.yml"
+    ],
+    "example_paths": [
+      "examples/repo-index.v1.json"
+    ]
+  }
+}

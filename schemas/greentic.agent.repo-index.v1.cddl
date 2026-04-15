@@ -1,0 +1,125 @@
+repo-index = {
+  version: text,
+  repo_name: text,
+  repo_role: repo-role,
+  generated_at: text,
+  freshness: freshness-status,
+  manifest: repo-agent-manifest,
+  concept_graph: [* concept-descriptor],
+  workflow_graph: [* workflow-descriptor],
+  validations: [* validation-descriptor],
+  reuse: [* reuse-descriptor],
+  instruction_graph: [* instruction-descriptor],
+  instruction_paths: [* text],
+  source_stats: source-stats,
+}
+
+repo-agent-manifest = {
+  version: text,
+  repo_name: text,
+  repo_root: text,
+  repo_role: repo-role,
+  primary_language: text,
+  generated_at: text,
+  candidate_docs: [* text],
+  cargo_manifests: [* text],
+}
+
+concept-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  scope: knowledge-scope,
+  lifecycle_phase: lifecycle-phase,
+  owners: [* text],
+  related_paths: [* text],
+}
+
+workflow-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  phase: lifecycle-phase,
+  commands: [* text],
+  docs: [* text],
+  concept_ids: [* text],
+}
+
+instruction-descriptor = {
+  id: text,
+  path: text,
+  title: text,
+  kind: text,
+  headings: [* text],
+  commands: [* text],
+  concept_ids: [* text],
+}
+
+validation-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  phase: lifecycle-phase,
+  command_groups: [* text],
+  triggered_by: [* text],
+}
+
+reuse-descriptor = {
+  id: text,
+  concept_id: text,
+  owner_repo: text,
+  rationale: text,
+  forbidden_locations: [* text],
+  required_validations: [* text],
+}
+
+source-stats = {
+  workspace_members: [* text],
+  crate_names: [* text],
+  modules: [* text],
+  public_items: [* text],
+  test_targets: [* text],
+  feature_names: [* text],
+  dependencies: [* text],
+  markdown_docs: [* text],
+  workflow_files: [* text],
+  example_paths: [* text],
+}
+
+repo-role = &(
+  core_contracts: "core_contracts",
+  cli_launcher: "cli_launcher",
+  component_authoring: "component_authoring",
+  flow_authoring: "flow_authoring",
+  pack_authoring: "pack_authoring",
+  bundle_assembly: "bundle_assembly",
+  solution_layer: "solution_layer",
+  sorla_layer: "sorla_layer",
+  provider_family: "provider_family",
+  demo_app: "demo_app",
+  customer_solution: "customer_solution",
+  examples_only: "examples_only",
+)
+
+knowledge-scope = &(
+  local_repo: "local_repo",
+  workspace: "workspace",
+  cross_repo: "cross_repo",
+  published_catalog: "published_catalog",
+)
+
+lifecycle-phase = &(
+  design: "design",
+  build: "build",
+  setup: "setup",
+  start: "start",
+  runtime: "runtime",
+  update: "update",
+  remove: "remove",
+)
+
+freshness-status = &(
+  fresh: "fresh",
+  stale: "stale",
+  unknown: "unknown",
+)

@@ -1,0 +1,19 @@
+workflow-descriptor = {
+  id: text,
+  title: text,
+  summary: text,
+  phase: lifecycle-phase,
+  commands: [* text],
+  docs: [* text],
+  concept_ids: [* text],
+}
+
+lifecycle-phase = &(
+  design: "design",
+  build: "build",
+  setup: "setup",
+  start: "start",
+  runtime: "runtime",
+  update: "update",
+  remove: "remove",
+)

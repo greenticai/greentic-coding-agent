@@ -1,0 +1,17 @@
+name: Nightly Coverage
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install greentic-dev
+        run: cargo binstall --no-confirm greentic-dev
+      - name: Run coverage policy
+        run: greentic-dev coverage

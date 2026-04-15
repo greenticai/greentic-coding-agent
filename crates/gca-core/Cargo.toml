@@ -1,0 +1,22 @@
+[package]
+name = "gca-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.13"
+
+[[bench]]
+name = "perf"
+harness = false

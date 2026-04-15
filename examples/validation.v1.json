@@ -1,0 +1,14 @@
+{
+  "id": "workspace_checks",
+  "title": "Workspace checks",
+  "summary": "Run standard Rust validation before finishing coding-agent changes.",
+  "phase": "build",
+  "command_groups": [
+    "cargo test --workspace --all-features",
+    "bash ci/local_check.sh"
+  ],
+  "triggered_by": [
+    "schema_change",
+    "core_contract_change"
+  ]
+}
