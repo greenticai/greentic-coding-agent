@@ -18,7 +18,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -42,7 +42,7 @@ jobs:
     needs: verify
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
       - name: Publish crates to crates.io
         env:
@@ -94,7 +94,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
