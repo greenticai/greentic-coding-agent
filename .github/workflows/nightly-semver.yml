@@ -1,0 +1,31 @@
+name: Nightly Semver Advisory
+
+# Advisory-mode cargo-semver-checks on a nightly schedule. The real semver
+# gate remains at weekly-stable-prepare on main; this is the compass, not
+# the gate. See plans/binary-bifurcation.md Phase A.4 (Wave 2).
+
+on:
+  schedule:
+    # 06:41 UTC — staggered slot for greentic-coding-agent.
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+    inputs:
+      baseline-rev:
+        description: "Optional explicit baseline git ref (default: latest vX.Y.Z tag)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-semver-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  advisory:
+    uses: greenticai/.github/.github/workflows/nightly-semver-advisory.yml@main
+    with:
+      semver-baseline-rev: ${{ inputs.baseline-rev || '' }}
+      semver-checks-package: greentic-coding-agent
