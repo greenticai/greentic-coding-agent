@@ -14,9 +14,6 @@ jobs:
     uses: greenticai/.github/.github/workflows/pr-ci.yml@main
     with:
       variant: host
-      # dependency-review already runs via dependency-review.yml; avoid
-      # duplicate runs.
-      run-dependency-review: false
 
   # Validates that crate metadata, packaging, and dry-run publish all pass.
   # Entangled with ci/local_check.sh; kept as a sibling rather than folded
