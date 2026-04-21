@@ -1,0 +1,38 @@
+name: Codex Security Fix
+# Runs on a nightly schedule, not on pull_request. See
+# plans/binary-bifurcation.md Phase A.4 (Wave 2).
+
+on:
+  schedule:
+    # 04:25 UTC — staggered slot for greentic-coding-agent.
+    - cron: "25 4 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to scan and patch (only for manual run)"
+        required: false
+        default: ""
+      max_alerts:
+        description: "Maximum open alerts per source to include"
+        required: true
+        default: "20"
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-fix:
+    # Do not run on fork PRs to avoid passing untrusted refs into privileged
+    # remediation workflows. With pull_request trigger removed, this guard is
+    # a no-op; kept for defense-in-depth if pull_request is ever re-added.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: greenticai/.github/.github/workflows/codex-security-fix.yml@main
+    with:
+      branch: ${{ github.event.inputs.branch || '' }}
+      max_alerts: ${{ github.event.inputs.max_alerts || '20' }}
+    secrets: inherit

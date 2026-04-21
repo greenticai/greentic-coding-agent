@@ -1,11 +1,15 @@
 name: Perf (lightweight)
+# Moved off pull_request onto a nightly schedule. See
+# plans/binary-bifurcation.md Phase A.4 (Wave 2).
 
 on:
-  pull_request:
+  schedule:
+    # 05:33 UTC — staggered slot for greentic-coding-agent.
+    - cron: "33 5 * * *"
   push:
     branches:
-      - master
       - main
+  workflow_dispatch:
 
 jobs:
   perf:

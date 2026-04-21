@@ -1,39 +1,26 @@
 name: CI
-
 on:
+  workflow_call:
   pull_request:
-  push:
-    branches:
-      - master
-      - main
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+  ci:
+    uses: greenticai/.github/.github/workflows/pr-ci.yml@main
+    with:
+      variant: host
+      # dependency-review already runs via dependency-review.yml; avoid
+      # duplicate runs.
+      run-dependency-review: false
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
-      - name: Run tests
-        run: cargo test --workspace --all-features
-
+  # Validates that crate metadata, packaging, and dry-run publish all pass.
+  # Entangled with ci/local_check.sh; kept as a sibling rather than folded
+  # into pr-ci.yml.
   package-dry-run:
     runs-on: ubuntu-latest
     steps:

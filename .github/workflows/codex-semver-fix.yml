@@ -1,0 +1,29 @@
+name: Codex Semver Fix
+# Runs on a nightly schedule, not on pull_request. See
+# plans/binary-bifurcation.md Phase A.4 (Wave 2).
+
+on:
+  schedule:
+    # 05:13 UTC — staggered slot for greentic-coding-agent.
+    - cron: "13 5 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to scan and patch (only for manual run)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semver-fix:
+    uses: greenticai/.github/.github/workflows/codex-semver-fix.yml@main
+    with:
+      branch: ${{ github.event.inputs.branch || '' }}
+      semver-checks-package: greentic-coding-agent
+    secrets: inherit
