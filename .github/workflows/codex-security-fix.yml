@@ -5,7 +5,7 @@ name: Codex Security Fix
 on:
   schedule:
     # 04:25 UTC — staggered slot for greentic-coding-agent.
-    - cron: "25 4 * * *"
+    - cron: "19 3 * * *"
   workflow_dispatch:
     inputs:
       branch:
