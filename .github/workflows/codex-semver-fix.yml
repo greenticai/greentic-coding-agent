@@ -5,7 +5,7 @@ name: Codex Semver Fix
 on:
   schedule:
     # 05:13 UTC — staggered slot for greentic-coding-agent.
-    - cron: "13 5 * * *"
+    - cron: "33 3 * * *"
   workflow_dispatch:
     inputs:
       branch:

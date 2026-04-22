@@ -7,7 +7,7 @@ name: Nightly Semver Advisory
 on:
   schedule:
     # 06:41 UTC — staggered slot for greentic-coding-agent.
-    - cron: "41 6 * * *"
+    - cron: "59 3 * * *"
   workflow_dispatch:
     inputs:
       baseline-rev:

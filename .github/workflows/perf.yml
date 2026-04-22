@@ -5,7 +5,7 @@ name: Perf (lightweight)
 on:
   schedule:
     # 05:33 UTC — staggered slot for greentic-coding-agent.
-    - cron: "33 5 * * *"
+    - cron: "41 3 * * *"
   push:
     branches:
       - main
