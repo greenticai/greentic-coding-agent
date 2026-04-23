@@ -1,14 +1,10 @@
 name: Perf (lightweight)
-# Moved off pull_request onto a nightly schedule. See
-# plans/binary-bifurcation.md Phase A.4 (Wave 2).
+# Nightly-only. See plans/binary-bifurcation.md Phase A.8: push-trigger removed
+# because post-merge perf runs were burning 15+ min without actionable signal.
 
 on:
   schedule:
-    # 05:33 UTC — staggered slot for greentic-coding-agent.
     - cron: "41 3 * * *"
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
