@@ -23,9 +23,47 @@ pub const BUILTIN_CONCEPT_IDS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoId {
+    pub org: String,
+    pub name: String,
+}
+
+impl RepoId {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim().trim_end_matches(".git");
+        let mut parts = value.split('/');
+        let Some(org) = parts.next() else {
+            return Err("repo id must use org/repo form".to_string());
+        };
+        let Some(name) = parts.next() else {
+            return Err("repo id must use org/repo form".to_string());
+        };
+        if parts.next().is_some() || org.is_empty() || name.is_empty() {
+            return Err("repo id must use org/repo form".to_string());
+        }
+        Ok(Self {
+            org: org.to_string(),
+            name: name.to_string(),
+        })
+    }
+
+    pub fn as_str(&self) -> String {
+        format!("{}/{}", self.org, self.name)
+    }
+
+    pub fn ghcr_path(&self) -> String {
+        self.as_str()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoAgentManifest {
     pub version: String,
+    #[serde(default = "default_repo_id")]
+    pub repo_id: String,
     pub repo_name: String,
+    #[serde(default)]
+    pub org: Option<String>,
     pub repo_root: String,
     pub repo_role: RepoRole,
     pub primary_language: String,
@@ -42,6 +80,9 @@ impl RepoAgentManifest {
         if self.repo_name.is_empty() {
             return Err("repo manifest repo_name must not be empty".to_string());
         }
+        if self.repo_id.is_empty() {
+            return Err("repo manifest repo_id must not be empty".to_string());
+        }
         Ok(())
     }
 }
@@ -49,6 +90,8 @@ impl RepoAgentManifest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoIndex {
     pub version: String,
+    #[serde(default = "default_repo_id")]
+    pub repo_id: String,
     pub repo_name: String,
     pub repo_role: RepoRole,
     pub generated_at: String,
@@ -196,11 +239,42 @@ impl ReuseDescriptor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogRepo {
+    #[serde(default = "default_repo_id")]
+    pub repo_id: String,
+    #[serde(default)]
     pub repo_name: String,
     pub repo_role: RepoRole,
     pub latest_tag: String,
     pub package_ref: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub visibility: IndexVisibility,
+    #[serde(default)]
+    pub tenant: Option<String>,
+    #[serde(default)]
+    pub required_auth: Option<AuthKind>,
+    #[serde(default)]
+    pub digest: Option<String>,
+    #[serde(default)]
+    pub source_commit: Option<String>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexVisibility {
+    #[default]
+    Public,
+    Tenant,
+    Private,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthKind {
+    GhcrToken,
+    BearerToken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +282,8 @@ pub struct Catalog {
     pub version: String,
     pub generated_at: String,
     pub repos: Vec<CatalogRepo>,
+    #[serde(default)]
+    pub change_log: Vec<CatalogChange>,
 }
 
 impl Catalog {
@@ -217,6 +293,34 @@ impl Catalog {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogChange {
+    pub action: CatalogAction,
+    pub repo_id: String,
+    pub tenant: Option<String>,
+    pub at: String,
+    pub by: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogAction {
+    AddRepo,
+    RemoveRepo,
+    EnableRepo,
+    DisableRepo,
+    Publish,
+}
+
+fn default_repo_id() -> String {
+    "unknown/unknown-repo".to_string()
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 pub fn builtin_concepts() -> Vec<ConceptDescriptor> {
@@ -238,7 +342,7 @@ pub fn builtin_concepts() -> Vec<ConceptDescriptor> {
 mod tests {
     use super::{
         BUILTIN_CONCEPT_IDS, Catalog, ConceptDescriptor, InstructionDescriptor, RepoAgentManifest,
-        RepoIndex, SCHEMA_VERSION_V1, SourceStats, builtin_concepts,
+        RepoId, RepoIndex, SCHEMA_VERSION_V1, SourceStats, builtin_concepts,
     };
     use crate::{
         FreshnessStatus, KnowledgeScope, LifecyclePhase, RepoRole, ReuseDescriptor,
@@ -258,7 +362,9 @@ mod tests {
     fn top_level_models_round_trip_through_json() {
         let manifest = RepoAgentManifest {
             version: SCHEMA_VERSION_V1.to_string(),
+            repo_id: "greenticai/greentic-coding-agent".to_string(),
             repo_name: "greentic-coding-agent".to_string(),
+            org: Some("greenticai".to_string()),
             repo_root: "/workspace/greentic-coding-agent".to_string(),
             repo_role: RepoRole::CliLauncher,
             primary_language: "rust".to_string(),
@@ -268,6 +374,7 @@ mod tests {
         };
         let repo_index = RepoIndex {
             version: SCHEMA_VERSION_V1.to_string(),
+            repo_id: manifest.repo_id.clone(),
             repo_name: manifest.repo_name.clone(),
             repo_role: manifest.repo_role,
             generated_at: "2026-04-15T00:00:00Z".to_string(),
@@ -336,11 +443,26 @@ mod tests {
             version: SCHEMA_VERSION_V1.to_string(),
             generated_at: "2026-04-15T00:00:00Z".to_string(),
             repos: vec![super::CatalogRepo {
+                repo_id: "greenticai/greentic-coding-agent".to_string(),
                 repo_name: "greentic-coding-agent".to_string(),
                 repo_role: RepoRole::CliLauncher,
                 latest_tag: "v0.1.0".to_string(),
                 package_ref: "ghcr.io/greenticai/indexes/greentic-coding-agent:v0.1.0".to_string(),
                 updated_at: "2026-04-15T00:00:00Z".to_string(),
+                visibility: super::IndexVisibility::Public,
+                tenant: None,
+                required_auth: None,
+                digest: None,
+                source_commit: None,
+                enabled: true,
+            }],
+            change_log: vec![super::CatalogChange {
+                action: super::CatalogAction::AddRepo,
+                repo_id: "greenticai/greentic-coding-agent".to_string(),
+                tenant: None,
+                at: "2026-04-15T00:00:00Z".to_string(),
+                by: None,
+                reason: None,
             }],
         };
 
@@ -360,6 +482,37 @@ mod tests {
             serde_json::from_str::<Catalog>(&catalog_json).unwrap(),
             catalog
         );
+    }
+
+    #[test]
+    fn repo_id_parses_org_repo_form() {
+        let repo_id = RepoId::parse("greenticai/greentic-types").unwrap();
+
+        assert_eq!(repo_id.org, "greenticai");
+        assert_eq!(repo_id.name, "greentic-types");
+        assert_eq!(repo_id.as_str(), "greenticai/greentic-types");
+        assert_eq!(repo_id.ghcr_path(), "greenticai/greentic-types");
+        assert!(RepoId::parse("greentic-types").is_err());
+    }
+
+    #[test]
+    fn old_repo_name_only_json_remains_readable() {
+        let manifest = serde_json::from_str::<RepoAgentManifest>(
+            r#"{
+              "version": "v1",
+              "repo_name": "legacy",
+              "repo_root": "/tmp/legacy",
+              "repo_role": "cli_launcher",
+              "primary_language": "rust",
+              "generated_at": "2026-04-15T00:00:00Z",
+              "candidate_docs": [],
+              "cargo_manifests": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.repo_id, "unknown/unknown-repo");
+        assert_eq!(manifest.repo_name, "legacy");
     }
 
     #[test]

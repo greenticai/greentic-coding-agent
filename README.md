@@ -7,7 +7,7 @@ The architecture and planned feature sequence are documented in [docs/architectu
 ## Current Status
 
 - Cargo workspace with implemented crates for CLI, core types, indexing, query, Greentic enrichment, agent-file generation, OCI-style local packaging/sync, and MCP-style helper responses.
-- Working CLI commands for `describe --here`, `concepts`, `workflows`, `search`, `locate-owner`, `required-validations`, `generate-agent-files`, `package-index`, `publish-index`, `show-catalog`, `check-refresh`, `install-github-workflow`, `impact`, `detect-changes`, `validate-plan`, and `serve`.
+- Working CLI commands for `analyze`, `bootstrap-instructions`, `describe --here`, `concepts`, `workflows`, `search`, `locate-owner`, `required-validations`, `generate-agent-files`, `package-index`, `publish-index`, `catalog`, `sync`, `rebuild-merged-index`, `watch-indexes`, `show-catalog`, `check-refresh`, `install-github-workflow`, `impact`, `detect-changes`, `validate-plan`, and `serve`.
 - Seeded adapter knowledge for `greentic-types`, `greentic-pack`, `greentic-bundle`, `greentic-dev`, `greentic-x`, and `greentic-sorla`.
 - CI, release, package validation, perf smoke checks, and nightly coverage hooks.
 
@@ -32,7 +32,16 @@ docs/
 ## Local vs Remote Model
 
 - Local-first: the CLI is intended to analyze the current checkout and write repo-local outputs.
-- Remote-aware: later PRs add OCI/GHCR publication and discovery so repo intelligence can be shared across Greentic repos.
+- Remote-aware: repo indexes can be packaged, published to GHCR with ORAS, discovered through public or tenant catalogs, synced into a user-global cache, and queried through a merged Tantivy index.
+- Server-ready: `serve --mcp`, `serve --stdio`, and `serve --http` expose the same query service used by the CLI.
+
+More detail:
+
+- [Catalogs](docs/catalogs.md)
+- [Tenant indexes](docs/tenant-indexes.md)
+- [Server](docs/server.md)
+- [GHCR format](docs/ghcr-format.md)
+- [Workflow installation](docs/workflow-installation.md)
 
 ## Seeded Adapters
 
@@ -75,9 +84,12 @@ cargo run -p greentic-coding-agent -- describe --here --format markdown
 cargo run -p greentic-coding-agent -- concepts --format json
 cargo run -p greentic-coding-agent -- workflows --format markdown
 cargo run -p greentic-coding-agent -- search --mode instruction wizard --format json
+cargo run -p greentic-coding-agent -- sync --format json
+cargo run -p greentic-coding-agent -- search --mode concept --scope merged wizard --format json
+cargo run -p greentic-coding-agent -- watch-indexes --once --format json
 cargo run -p greentic-coding-agent -- check-refresh --format json
-cargo run -p greentic-coding-agent -- serve --format json
-cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.describe-repo.json --format json
+cargo run -p greentic-coding-agent -- serve --stdio
+cargo run -p greentic-coding-agent -- serve --http --host 127.0.0.1 --port 7757
 cargo run -p greentic-coding-agent -- validate-plan examples/plan.v1.json --format markdown
 ```
 
@@ -93,12 +105,35 @@ Committed example artifacts live under [`examples/`](examples/README.md).
 
 - `examples/greentic-agent-index.workflow.yml`
   Example output from `install-github-workflow`.
-- `examples/mcp-request.describe-repo.json`
+- `examples/catalog.public.v1.json`, `examples/catalog.tenant.meeza.v1.json`
+  Example public and tenant catalog payloads.
+- `examples/mcp-request.describe-repo.json`, `examples/mcp-request.search-all.json`
   Example MCP-style request payload for `serve --request-file`.
+- `examples/server-search-request.json`
+  Example HTTP `/search` request body.
 - `examples/plan.v1.json`
   Example input for `validate-plan`.
 - `examples/repo-manifest.v1.json`, `examples/repo-index.v1.json`, `examples/catalog.v1.json`
   Example machine-readable outputs for the current schema layer.
+
+## Migration Compatibility
+
+New outputs use `repo_id` in canonical `org/repo` form. Existing `repo_name`-only inputs remain readable for one compatibility version when unambiguous, with this exact warning text for legacy catalog inputs:
+
+```text
+legacy repo_name-only input: repo_id missing; using inferred repo_id unknown/<repo_name> for this version
+```
+
+Compatibility matrix:
+
+| Input type | Old `repo_name` only | New `repo_id` |
+| --- | --- | --- |
+| repo manifest | read with warning | canonical |
+| repo index | read with warning | canonical |
+| catalog | read with warning | canonical |
+| registry | migrate on write | canonical |
+| package/cache path | read old path | write new org/repo path |
+| search/MCP response | add repo_id | canonical |
 
 ## CI and Releases
 

@@ -1,7 +1,11 @@
+mod tantivy_search;
+
 use gca_core::{FreshnessStatus, LifecyclePhase, RepoIndex, ReuseDescriptor, ValidationDescriptor};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+
+pub use tantivy_search::{SearchEngineChoice, search_tantivy_index};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +39,7 @@ pub enum SearchResultType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchResult {
+    pub repo_id: String,
     pub id: String,
     pub title: String,
     pub result_type: SearchResultType,
@@ -80,6 +85,57 @@ pub struct OwnerLookup {
 pub struct RequiredValidationsResponse {
     pub task: String,
     pub validations: Vec<ValidationDescriptor>,
+}
+
+pub trait SearchEngine {
+    fn search(&self, mode: SearchMode, query: &str) -> Result<SearchResponse, String>;
+}
+
+pub struct FallbackSearchEngine<'a> {
+    pub repo_index: &'a RepoIndex,
+}
+
+impl SearchEngine for FallbackSearchEngine<'_> {
+    fn search(&self, mode: SearchMode, query: &str) -> Result<SearchResponse, String> {
+        Ok(search_repo_index(self.repo_index, mode, query))
+    }
+}
+
+pub struct TantivySearchEngine<'a> {
+    pub index_dir: &'a Path,
+}
+
+impl SearchEngine for TantivySearchEngine<'_> {
+    fn search(&self, mode: SearchMode, query: &str) -> Result<SearchResponse, String> {
+        search_tantivy_index(self.index_dir, mode, query)
+    }
+}
+
+pub fn search_repo_index_with_engine(
+    repo_index: &RepoIndex,
+    tantivy_index_dir: Option<&Path>,
+    mode: SearchMode,
+    query: &str,
+    engine: SearchEngineChoice,
+) -> Result<SearchResponse, String> {
+    match engine {
+        SearchEngineChoice::Fallback => FallbackSearchEngine { repo_index }.search(mode, query),
+        SearchEngineChoice::Tantivy => {
+            let Some(index_dir) = tantivy_index_dir else {
+                return Err("tantivy index path was not provided".to_string());
+            };
+            TantivySearchEngine { index_dir }.search(mode, query)
+        }
+        SearchEngineChoice::Auto => {
+            if let Some(index_dir) = tantivy_index_dir
+                && index_dir.exists()
+                && let Ok(response) = (TantivySearchEngine { index_dir }).search(mode, query)
+            {
+                return Ok(response);
+            }
+            FallbackSearchEngine { repo_index }.search(mode, query)
+        }
+    }
 }
 
 pub fn command_catalog() -> Vec<CommandCatalogEntry> {
@@ -132,7 +188,8 @@ pub fn command_catalog() -> Vec<CommandCatalogEntry> {
             when_to_use: "When deciding which coding-agent command to use next.".to_string(),
         },
         CommandCatalogEntry {
-            command: "greentic-coding-agent search --mode <mode> <query>".to_string(),
+            command: "greentic-coding-agent search --mode <mode> --engine auto <query>"
+                .to_string(),
             purpose:
                 "Search code, instructions, concepts, or reuse policy using the local repo index."
                     .to_string(),
@@ -527,6 +584,7 @@ fn search_code(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> {
     for module in &repo_index.source_stats.modules {
         if module.to_ascii_lowercase().contains(&query) {
             results.push(SearchResult {
+                repo_id: repo_index.repo_id.clone(),
                 id: format!("code:module:{module}"),
                 title: module.clone(),
                 result_type: SearchResultType::Code,
@@ -541,6 +599,7 @@ fn search_code(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> {
     for item in &repo_index.source_stats.public_items {
         if item.to_ascii_lowercase().contains(&query) {
             results.push(SearchResult {
+                repo_id: repo_index.repo_id.clone(),
                 id: format!("code:public:{}", sanitize_id(item)),
                 title: item.clone(),
                 result_type: SearchResultType::Code,
@@ -560,6 +619,7 @@ fn search_code(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> {
     for dependency in &repo_index.source_stats.dependencies {
         if dependency.to_ascii_lowercase().contains(&query) {
             results.push(SearchResult {
+                repo_id: repo_index.repo_id.clone(),
                 id: format!("code:dependency:{dependency}"),
                 title: dependency.clone(),
                 result_type: SearchResultType::Code,
@@ -596,6 +656,7 @@ fn search_instruction(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> 
                     .any(|concept| concept.to_ascii_lowercase().contains(&query))
         })
         .map(|entry| SearchResult {
+            repo_id: repo_index.repo_id.clone(),
             id: format!("instruction:{}", entry.id),
             title: entry.title.clone(),
             result_type: SearchResultType::Instruction,
@@ -628,6 +689,7 @@ fn search_concept(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> {
                     .any(|path| path.to_ascii_lowercase().contains(&query))
         })
         .map(|concept| SearchResult {
+            repo_id: repo_index.repo_id.clone(),
             id: format!("concept:{}", concept.id),
             title: concept.title.clone(),
             result_type: SearchResultType::Concept,
@@ -655,6 +717,7 @@ fn search_reuse(repo_index: &RepoIndex, query: &str) -> Vec<SearchResult> {
                     .any(|entry| entry.to_ascii_lowercase().contains(&query))
         })
         .map(|reuse| SearchResult {
+            repo_id: repo_index.repo_id.clone(),
             id: format!("reuse:{}", reuse.id),
             title: format!("{} owned by {}", reuse.concept_id, reuse.owner_repo),
             result_type: SearchResultType::Reuse,
@@ -866,7 +929,9 @@ mod tests {
     fn demo_repo_index() -> RepoIndex {
         let manifest = RepoAgentManifest {
             version: "v1".to_string(),
+            repo_id: "greenticai/greentic-coding-agent".to_string(),
             repo_name: "greentic-coding-agent".to_string(),
+            org: Some("greenticai".to_string()),
             repo_root: "/tmp/demo".to_string(),
             repo_role: RepoRole::CliLauncher,
             primary_language: "rust".to_string(),
@@ -878,6 +943,7 @@ mod tests {
         let policy = built_in_policy_bundle();
         RepoIndex {
             version: "v1".to_string(),
+            repo_id: manifest.repo_id.clone(),
             repo_name: manifest.repo_name.clone(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "unix:1".to_string(),

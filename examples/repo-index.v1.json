@@ -1,12 +1,15 @@
 {
   "version": "v1",
+  "repo_id": "greenticai/greentic-coding-agent",
   "repo_name": "greentic-coding-agent",
   "repo_role": "cli_launcher",
   "generated_at": "2026-04-15T00:00:00Z",
   "freshness": "fresh",
   "manifest": {
     "version": "v1",
+    "repo_id": "greenticai/greentic-coding-agent",
     "repo_name": "greentic-coding-agent",
+    "org": "greenticai",
     "repo_root": "/workspace/greentic-coding-agent",
     "repo_role": "cli_launcher",
     "primary_language": "rust",

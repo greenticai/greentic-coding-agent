@@ -1,0 +1,9 @@
+{
+  "id": "search-1",
+  "tool": "search_all",
+  "arguments": {
+    "query": "wizard",
+    "mode": "instruction",
+    "scope": "merged"
+  }
+}

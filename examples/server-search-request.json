@@ -1,0 +1,6 @@
+{
+  "query": "wizard",
+  "mode": "instruction",
+  "scope": "merged",
+  "repo": "greenticai/greentic-coding-agent"
+}

@@ -82,7 +82,12 @@ pub fn tool_definitions() -> Vec<McpTool> {
             "Search indexed docs and instructions.",
         ),
         tool("search_reuse", "Search seeded reuse and ownership policy."),
+        tool("search_all", "Search all indexed local result types."),
         tool("locate_owner", "Find the owner repo for a concept."),
+        tool(
+            "locate_extension_point",
+            "Find likely extension points for a concept or task.",
+        ),
         tool(
             "plan_change",
             "Validate a proposed plan against repo policy.",
@@ -101,9 +106,11 @@ pub fn tool_definitions() -> Vec<McpTool> {
         ),
         tool("show_freshness", "Report whether the local index is stale."),
         tool(
-            "list_remote_repos",
-            "List repos currently available in the remote store.",
+            "list_indexed_repos",
+            "List repos currently available in the local index cache.",
         ),
+        tool("sync_indexes", "Refresh local index cache metadata."),
+        tool("show_catalog", "Show catalog metadata."),
     ]
 }
 
@@ -150,12 +157,27 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
             search_value(context.repo_index, SearchMode::Instruction, &arguments)
         }
         "search_reuse" => search_value(context.repo_index, SearchMode::Reuse, &arguments),
+        "search_all" => {
+            let Some(query) = arguments.get("query").and_then(Value::as_str) else {
+                return error_response(id, "missing `query` argument");
+            };
+            serde_json::to_value([
+                search_repo_index(context.repo_index, SearchMode::Code, query),
+                search_repo_index(context.repo_index, SearchMode::Instruction, query),
+                search_repo_index(context.repo_index, SearchMode::Concept, query),
+                search_repo_index(context.repo_index, SearchMode::Reuse, query),
+            ])
+            .map_err(|error| error.to_string())
+        }
         "locate_owner" => {
             let Some(concept_id) = arguments.get("concept_id").and_then(Value::as_str) else {
                 return error_response(id, "missing `concept_id` argument");
             };
             serde_json::to_value(locate_owner(context.policy, concept_id))
                 .map_err(|error| error.to_string())
+        }
+        "locate_extension_point" => {
+            search_value(context.repo_index, SearchMode::Instruction, &arguments)
         }
         "plan_change" => {
             let Some(task) = arguments.get("task").and_then(Value::as_str) else {
@@ -197,9 +219,18 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
             "freshness_warning": context.freshness_warning
         }))
         .map_err(|error| error.to_string()),
-        "list_remote_repos" => {
+        "list_indexed_repos" | "list_remote_repos" => {
             serde_json::to_value(&context.remote_repos).map_err(|error| error.to_string())
         }
+        "sync_indexes" => serde_json::to_value(serde_json::json!({
+            "ok": true,
+            "message": "sync is transport-managed"
+        }))
+        .map_err(|error| error.to_string()),
+        "show_catalog" => serde_json::to_value(serde_json::json!({
+            "repos": context.remote_repos
+        }))
+        .map_err(|error| error.to_string()),
         other => return error_response(id, &format!("unknown tool: {other}")),
     };
 
@@ -435,7 +466,14 @@ mod tests {
             snapshot.freshness_warning.as_deref(),
             Some("index is stale")
         );
-        assert_eq!(tool_definitions().len(), 13);
+        assert_eq!(tool_definitions().len(), 17);
+        assert!(snapshot.tools.iter().any(|tool| tool.name == "search_all"));
+        assert!(
+            snapshot
+                .tools
+                .iter()
+                .any(|tool| tool.name == "sync_indexes")
+        );
     }
 
     #[test]
@@ -530,13 +568,16 @@ mod tests {
     fn demo_repo_index() -> RepoIndex {
         RepoIndex {
             version: "v1".to_string(),
+            repo_id: "greenticai/demo-repo".to_string(),
             repo_name: "demo-repo".to_string(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "2026-04-15T00:00:00Z".to_string(),
             freshness: FreshnessStatus::Fresh,
             manifest: RepoAgentManifest {
                 version: "v1".to_string(),
+                repo_id: "greenticai/demo-repo".to_string(),
                 repo_name: "demo-repo".to_string(),
+                org: Some("greenticai".to_string()),
                 repo_root: "/tmp/demo-repo".to_string(),
                 repo_role: RepoRole::CliLauncher,
                 primary_language: "rust".to_string(),
