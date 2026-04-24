@@ -60,7 +60,7 @@ pub fn search_tantivy_index(
         .parse_query(query)
         .map_err(|error| error.to_string())?;
     let top_docs = searcher
-        .search(&parsed, &TopDocs::with_limit(50))
+        .search(&parsed, &TopDocs::with_limit(50).order_by_score())
         .map_err(|error| error.to_string())?;
 
     let mut results = Vec::new();

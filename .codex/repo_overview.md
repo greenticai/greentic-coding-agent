@@ -89,7 +89,7 @@ The active rewritten PR-01 through PR-10 plan is implemented locally. The worksp
 - **Path:** `.github/workflows/ci.yml`, `publish.yml`, `perf.yml`, `nightly-coverage.yml`
   - **Role:** CI, release, perf smoke, and nightly coverage workflows.
   - **Key functionality:** Validate workspace health, publish the CLI crate, build release archives, run perf smoke checks, and enforce the coverage policy.
-  - **Key dependencies / integration points:** `ci.yml` and `publish.yml` are thin wrappers around standard reusable workflows from `greenticai/.github`; local custom CI/release logic lives in `ci/local_check.sh` for developer validation rather than duplicated GitHub Actions jobs.
+  - **Key dependencies / integration points:** `ci.yml` and `publish.yml` are thin wrappers around standard reusable workflows from `greenticai/.github`; release binaries/GitHub Release updates finish before crates.io publication, and local custom CI/release logic lives in `ci/local_check.sh` for developer validation rather than duplicated GitHub Actions jobs.
 
 - **Path:** `coverage-policy.json`
   - **Role:** Coverage enforcement policy.
