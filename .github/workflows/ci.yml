@@ -1,7 +1,9 @@
 name: CI
+
 on:
   workflow_call:
   pull_request:
+
 permissions:
   contents: read
 
@@ -11,18 +13,6 @@ concurrency:
 
 jobs:
   ci:
-    uses: greenticai/.github/.github/workflows/pr-ci.yml@main
+    uses: greenticai/.github/.github/workflows/host-crate-ci.yml@main
     with:
-      variant: host
-
-  # Validates that crate metadata, packaging, and dry-run publish all pass.
-  # Entangled with ci/local_check.sh; kept as a sibling rather than folded
-  # into pr-ci.yml.
-  package-dry-run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-      - uses: Swatinem/rust-cache@v2
-      - name: Validate packaging and crates.io dry-runs
-        run: bash ci/local_check.sh --mode package
+      rust-version: "1.95.0"

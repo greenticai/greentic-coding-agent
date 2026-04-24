@@ -142,9 +142,9 @@ The repository uses a small set of consistent automation entrypoints:
 - `ci/local_check.sh`
   Runs formatting, clippy, tests, build, docs, package content checks, `cargo package`, and `cargo publish --dry-run` for every publishable crate in the workspace.
 - `.github/workflows/ci.yml`
-  Runs lint, tests, and package dry-run checks on pull requests and pushes to `master` / `main`.
+  Calls the standard `greenticai/.github` host crate CI workflow on pull requests.
 - `.github/workflows/publish.yml`
-  Verifies the repository, confirms the tag matches the CLI crate version from `crates/gca-cli/Cargo.toml`, publishes to crates.io, builds release archives for six runner targets, uploads release assets, and publishes an OCI artifact bundle to GHCR.
+  Calls the standard `greenticai/.github` crates publish and release binaries workflows on `v*` tags.
 - `.github/workflows/perf.yml`
   Runs lightweight concurrency guards and a Criterion smoke benchmark for `gca-core`.
 
@@ -170,7 +170,7 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Pushing the tag triggers `.github/workflows/publish.yml`. A manual `workflow_dispatch` run is also supported; it still derives the release tag from the CLI crate version and enforces `v<version>`.
+Pushing the tag triggers `.github/workflows/publish.yml`.
 
 ### Required GitHub secrets
 
