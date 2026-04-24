@@ -2586,7 +2586,15 @@ fn file_digest_hex(path: &Path) -> Result<String, String> {
         .map_err(|error| format!("failed to read digest input {}: {error}", path.display()))?;
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex_encode(hasher.finalize()))
+}
+
+fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn repo_role_for_repo_id(repo_id: &str) -> RepoRole {
@@ -5160,7 +5168,7 @@ fn catalog_fingerprint(home: &Path) -> String {
             hasher.update(bytes);
         }
     }
-    format!("{:x}", hasher.finalize())
+    hex_encode(hasher.finalize())
 }
 
 fn upsert_synced_repo(state: &mut SyncState, entry: SyncedRepoState) {
@@ -6124,7 +6132,7 @@ fn search_tantivy_index_filtered(
         .parse_query(query)
         .map_err(|error| error.to_string())?;
     let top_docs = searcher
-        .search(&parsed, &TopDocs::with_limit(50))
+        .search(&parsed, &TopDocs::with_limit(50).order_by_score())
         .map_err(|error| error.to_string())?;
 
     let mut results = Vec::new();

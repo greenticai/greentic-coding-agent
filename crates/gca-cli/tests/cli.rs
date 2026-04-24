@@ -48,7 +48,10 @@ fn describe_here_json_returns_minimal_repo_metadata() {
 
     command.assert().success().stdout(
         predicate::str::contains("\"repo_name\": \"greentic-coding-agent\"")
-            .and(predicate::str::contains("\"version\": \"0.1.0\""))
+            .and(predicate::str::contains(format!(
+                "\"version\": \"{}\"",
+                env!("CARGO_PKG_VERSION")
+            )))
             .and(predicate::str::contains("\"has_git_dir\": true")),
     );
 }
