@@ -5155,7 +5155,6 @@ fn catalog_fingerprint(home: &Path) -> String {
             .join("catalogs")
             .join("public")
             .join("catalog.json"),
-        sync_state_path(home),
     ] {
         if let Ok(bytes) = fs::read(path) {
             hasher.update(bytes);
