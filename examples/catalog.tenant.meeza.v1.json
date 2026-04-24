@@ -1,0 +1,30 @@
+{
+  "version": "v1",
+  "generated_at": "2026-04-24T00:00:00Z",
+  "repos": [
+    {
+      "repo_id": "greentic-biz/meeza-store",
+      "repo_name": "meeza-store",
+      "repo_role": "customer_solution",
+      "latest_tag": "latest",
+      "package_ref": "ghcr.io/greenticai/indexes/tenants/meeza/greentic-biz/meeza-store:latest",
+      "updated_at": "2026-04-24T00:00:00Z",
+      "visibility": "tenant",
+      "tenant": "meeza",
+      "required_auth": "ghcr_token",
+      "digest": null,
+      "source_commit": null,
+      "enabled": true
+    }
+  ],
+  "change_log": [
+    {
+      "action": "add_repo",
+      "repo_id": "greentic-biz/meeza-store",
+      "tenant": "meeza",
+      "at": "2026-04-24T00:00:00Z",
+      "by": "greentic-agent",
+      "reason": "tenant-private product index"
+    }
+  ]
+}

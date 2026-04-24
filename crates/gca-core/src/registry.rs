@@ -6,7 +6,11 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegistryEntry {
+    #[serde(default = "default_repo_id")]
+    pub repo_id: String,
     pub repo_name: String,
+    #[serde(default)]
+    pub org: Option<String>,
     pub repo_path: String,
     pub repo_role: RepoRole,
     pub last_analyzed_commit: String,
@@ -30,19 +34,21 @@ impl Registry {
     }
 
     pub fn upsert(&mut self, entry: RegistryEntry) {
-        if let Some(existing) = self
-            .repos
-            .iter_mut()
-            .find(|existing| existing.repo_path == entry.repo_path)
-        {
+        if let Some(existing) = self.repos.iter_mut().find(|existing| {
+            existing.repo_id == entry.repo_id || existing.repo_path == entry.repo_path
+        }) {
             *existing = entry;
             return;
         }
 
         self.repos.push(entry);
         self.repos
-            .sort_by(|left, right| left.repo_path.cmp(&right.repo_path));
+            .sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
     }
+}
+
+fn default_repo_id() -> String {
+    "unknown/unknown-repo".to_string()
 }
 
 #[derive(Debug, Error)]
@@ -96,8 +102,15 @@ pub fn write_registry(path: &Path, registry: &Registry) -> Result<(), RegistryEr
         })?;
     }
 
+    let mut registry = registry.clone();
+    for entry in &mut registry.repos {
+        if entry.repo_id == default_repo_id() && !entry.repo_name.trim().is_empty() {
+            entry.repo_id = format!("unknown/{}", entry.repo_name.trim());
+        }
+    }
+
     let raw =
-        serde_json::to_string_pretty(registry).map_err(|source| RegistryError::Serialize {
+        serde_json::to_string_pretty(&registry).map_err(|source| RegistryError::Serialize {
             path: path.display().to_string(),
             source,
         })?;
@@ -129,7 +142,9 @@ mod tests {
         let mut registry = Registry::empty();
 
         registry.upsert(RegistryEntry {
+            repo_id: "greenticai/repo".to_string(),
             repo_name: "repo".to_string(),
+            org: Some("greenticai".to_string()),
             repo_path: "/tmp/repo".to_string(),
             repo_role: RepoRole::CliLauncher,
             last_analyzed_commit: "abc".to_string(),
@@ -138,7 +153,9 @@ mod tests {
             updated_at: "2026-04-15T00:00:00Z".to_string(),
         });
         registry.upsert(RegistryEntry {
+            repo_id: "greenticai/repo".to_string(),
             repo_name: "repo".to_string(),
+            org: Some("greenticai".to_string()),
             repo_path: "/tmp/repo".to_string(),
             repo_role: RepoRole::CliLauncher,
             last_analyzed_commit: "def".to_string(),
@@ -157,7 +174,9 @@ mod tests {
         let path = temp.path().join("registry.json");
         let mut registry = Registry::empty();
         registry.upsert(RegistryEntry {
+            repo_id: "greenticai/repo".to_string(),
             repo_name: "repo".to_string(),
+            org: Some("greenticai".to_string()),
             repo_path: "/tmp/repo".to_string(),
             repo_role: RepoRole::CliLauncher,
             last_analyzed_commit: "abc".to_string(),
@@ -170,5 +189,28 @@ mod tests {
         let loaded = load_registry(&path).unwrap();
 
         assert_eq!(loaded, registry);
+    }
+
+    #[test]
+    fn write_registry_migrates_legacy_repo_name_only_entries() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("registry.json");
+        let mut registry = Registry::empty();
+        registry.upsert(RegistryEntry {
+            repo_id: "unknown/unknown-repo".to_string(),
+            repo_name: "legacy".to_string(),
+            org: None,
+            repo_path: "/tmp/legacy".to_string(),
+            repo_role: RepoRole::CliLauncher,
+            last_analyzed_commit: "abc".to_string(),
+            manifest_path: "/tmp/legacy/.greentic-agent/manifest.json".to_string(),
+            repo_index_path: "/tmp/legacy/.greentic-agent/repo-index.json".to_string(),
+            updated_at: "2026-04-15T00:00:00Z".to_string(),
+        });
+
+        write_registry(&path, &registry).unwrap();
+        let loaded = load_registry(&path).unwrap();
+
+        assert_eq!(loaded.repos[0].repo_id, "unknown/legacy");
     }
 }

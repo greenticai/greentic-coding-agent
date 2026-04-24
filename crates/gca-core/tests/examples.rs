@@ -26,11 +26,34 @@ fn example_repo_index_fixture_loads() {
 #[test]
 fn example_catalog_fixture_loads() {
     let raw = include_str!("../../../examples/catalog.v1.json");
+    let public_raw = include_str!("../../../examples/catalog.public.v1.json");
+    let tenant_raw = include_str!("../../../examples/catalog.tenant.meeza.v1.json");
     let catalog: Catalog = serde_json::from_str(raw).unwrap();
+    let public_catalog: Catalog = serde_json::from_str(public_raw).unwrap();
+    let tenant_catalog: Catalog = serde_json::from_str(tenant_raw).unwrap();
 
     catalog.validate().unwrap();
+    public_catalog.validate().unwrap();
+    tenant_catalog.validate().unwrap();
     assert_eq!(catalog.version, "v1");
     assert_eq!(catalog.repos.len(), 1);
+    assert_eq!(public_catalog.repos[0].repo_id, "greenticai/greentic-types");
+    assert_eq!(tenant_catalog.repos[0].tenant.as_deref(), Some("meeza"));
+}
+
+#[test]
+fn example_request_fixtures_are_valid_json() {
+    let describe_raw = include_str!("../../../examples/mcp-request.describe-repo.json");
+    let search_raw = include_str!("../../../examples/mcp-request.search-all.json");
+    let server_search_raw = include_str!("../../../examples/server-search-request.json");
+
+    let describe: serde_json::Value = serde_json::from_str(describe_raw).unwrap();
+    let search: serde_json::Value = serde_json::from_str(search_raw).unwrap();
+    let server_search: serde_json::Value = serde_json::from_str(server_search_raw).unwrap();
+
+    assert_eq!(describe["tool"], "describe_repo");
+    assert_eq!(search["tool"], "search_all");
+    assert_eq!(server_search["query"], "wizard");
 }
 
 #[test]

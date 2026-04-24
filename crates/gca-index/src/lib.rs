@@ -1,5 +1,7 @@
+mod tantivy_index;
+
 use gca_core::{
-    FreshnessStatus, InstructionDescriptor, RegistryEntry, RepoAgentManifest, RepoIndex,
+    FreshnessStatus, InstructionDescriptor, RegistryEntry, RepoAgentManifest, RepoId, RepoIndex,
     SourceStats, builtin_concepts, load_registry, write_registry,
 };
 use gca_greentic::{
@@ -13,6 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 const LOCAL_INDEX_DIR: &str = ".greentic-agent";
+
+pub use tantivy_index::{TantivyBuildReport, TantivyIndexError, build_local_tantivy_index};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fingerprints {
@@ -31,6 +35,7 @@ pub struct AnalyzeOutputs {
     pub repo_index_path: PathBuf,
     pub fingerprints_path: PathBuf,
     pub registry_path: PathBuf,
+    pub tantivy_report: Option<TantivyBuildReport>,
 }
 
 #[derive(Debug, Error)]
@@ -56,6 +61,8 @@ pub enum AnalyzeError {
     },
     #[error("failed to update registry: {0}")]
     Registry(#[from] gca_core::RegistryError),
+    #[error("failed to build tantivy index: {0}")]
+    Tantivy(#[from] TantivyIndexError),
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +85,8 @@ pub fn analyze_repo(
         .and_then(|name| name.to_str())
         .unwrap_or("unknown-repo")
         .to_string();
+    let repo_id = detect_repo_id(&repo_root, &repo_name);
+    let org = RepoId::parse(&repo_id).ok().map(|repo_id| repo_id.org);
     let generated_at = timestamp_string();
     let head_sha = read_head_sha(&repo_root).unwrap_or_else(|| "unknown".to_string());
     let default_branch = read_default_branch(&repo_root);
@@ -99,7 +108,9 @@ pub fn analyze_repo(
 
     let manifest = RepoAgentManifest {
         version: gca_core::SCHEMA_VERSION_V1.to_string(),
+        repo_id: repo_id.clone(),
         repo_name: repo_name.clone(),
+        org: org.clone(),
         repo_root: repo_root.display().to_string(),
         repo_role,
         primary_language: "rust".to_string(),
@@ -130,6 +141,7 @@ pub fn analyze_repo(
 
     let repo_index = RepoIndex {
         version: gca_core::SCHEMA_VERSION_V1.to_string(),
+        repo_id: repo_id.clone(),
         repo_name: repo_name.clone(),
         repo_role,
         generated_at: generated_at.clone(),
@@ -162,10 +174,16 @@ pub fn analyze_repo(
     write_json(&manifest_path, &manifest)?;
     write_json(&repo_index_path, &repo_index)?;
     write_json(&fingerprints_path, &fingerprints)?;
+    let tantivy_report = Some(build_local_tantivy_index(
+        &repo_index,
+        &local_dir.join("tantivy").join("local"),
+    )?);
 
     let mut registry = load_registry(registry_path)?;
     registry.upsert(RegistryEntry {
+        repo_id,
         repo_name,
+        org,
         repo_path: repo_root.display().to_string(),
         repo_role,
         last_analyzed_commit: head_sha,
@@ -183,6 +201,7 @@ pub fn analyze_repo(
         repo_index_path,
         fingerprints_path,
         registry_path: registry_path.to_path_buf(),
+        tantivy_report,
     })
 }
 
@@ -213,6 +232,42 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
         }
     }
 
+    None
+}
+
+pub fn detect_repo_id(repo_root: &Path, repo_name: &str) -> String {
+    read_origin_url(repo_root)
+        .and_then(|url| parse_github_remote_url(&url))
+        .unwrap_or_else(|| format!("unknown/{repo_name}"))
+}
+
+fn read_origin_url(repo_root: &Path) -> Option<String> {
+    let config = fs::read_to_string(repo_root.join(".git").join("config")).ok()?;
+    let mut in_origin = false;
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_origin = trimmed == r#"[remote "origin"]"#;
+            continue;
+        }
+        if in_origin && let Some(url) = trimmed.strip_prefix("url =") {
+            return Some(url.trim().to_string());
+        }
+    }
+    None
+}
+
+pub fn parse_github_remote_url(value: &str) -> Option<String> {
+    let value = value.trim().trim_end_matches(".git");
+    if let Some(path) = value.strip_prefix("git@github.com:") {
+        return RepoId::parse(path).ok().map(|repo_id| repo_id.as_str());
+    }
+    if let Some(path) = value.strip_prefix("https://github.com/") {
+        return RepoId::parse(path).ok().map(|repo_id| repo_id.as_str());
+    }
+    if let Some(path) = value.strip_prefix("ssh://git@github.com/") {
+        return RepoId::parse(path).ok().map(|repo_id| repo_id.as_str());
+    }
     None
 }
 
@@ -707,7 +762,7 @@ fn timestamp_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{analyze_repo, default_registry_path};
+    use super::{analyze_repo, default_registry_path, parse_github_remote_url};
     use gca_core::load_registry;
     use std::fs;
     use tempfile::tempdir;
@@ -724,7 +779,13 @@ mod tests {
         assert!(outputs.manifest_path.exists());
         assert!(outputs.repo_index_path.exists());
         assert!(outputs.fingerprints_path.exists());
+        let tantivy_report = outputs.tantivy_report.as_ref().unwrap();
+        assert!(tantivy_report.index_path.exists());
+        assert!(tantivy_report.documents_indexed > 0);
         assert_eq!(outputs.manifest.repo_name, "demo-repo");
+        assert_eq!(outputs.manifest.repo_id, "greenticai/demo-repo");
+        assert_eq!(outputs.manifest.org.as_deref(), Some("greenticai"));
+        assert_eq!(outputs.repo_index.repo_id, "greenticai/demo-repo");
         assert_eq!(outputs.fingerprints.head_sha, "abc123");
         assert!(!outputs.repo_index.concept_graph.is_empty());
         assert!(
@@ -759,6 +820,26 @@ mod tests {
         let registry = load_registry(&registry_path).unwrap();
         assert_eq!(registry.repos.len(), 1);
         assert_eq!(registry.repos[0].repo_name, "demo-repo");
+        assert_eq!(registry.repos[0].repo_id, "greenticai/demo-repo");
+    }
+
+    #[test]
+    fn github_remote_urls_parse_to_repo_id() {
+        assert_eq!(
+            parse_github_remote_url("git@github.com:greenticai/greentic-coding-agent.git")
+                .as_deref(),
+            Some("greenticai/greentic-coding-agent")
+        );
+        assert_eq!(
+            parse_github_remote_url("https://github.com/greentic-biz/meeza-store.git").as_deref(),
+            Some("greentic-biz/meeza-store")
+        );
+        assert_eq!(
+            parse_github_remote_url("ssh://git@github.com/greenticai/greentic-types.git")
+                .as_deref(),
+            Some("greenticai/greentic-types")
+        );
+        assert!(parse_github_remote_url("https://example.com/greenticai/nope.git").is_none());
     }
 
     #[test]
@@ -820,6 +901,11 @@ mod tests {
         fs::write(
             repo_root.join(".git").join("HEAD"),
             "ref: refs/heads/main\n",
+        )
+        .unwrap();
+        fs::write(
+            repo_root.join(".git").join("config"),
+            "[remote \"origin\"]\n    url = git@github.com:greenticai/demo-repo.git\n",
         )
         .unwrap();
         fs::write(

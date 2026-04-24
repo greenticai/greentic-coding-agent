@@ -3,11 +3,19 @@
   "generated_at": "2026-04-15T00:00:00Z",
   "repos": [
     {
+      "repo_id": "greenticai/greentic-coding-agent",
       "repo_name": "greentic-coding-agent",
       "repo_role": "cli_launcher",
       "latest_tag": "v0.1.0",
-      "package_ref": "ghcr.io/greenticai/indexes/greentic-coding-agent:v0.1.0",
-      "updated_at": "2026-04-15T00:00:00Z"
+      "package_ref": "ghcr.io/greenticai/indexes/greenticai/greentic-coding-agent:v0.1.0",
+      "updated_at": "2026-04-15T00:00:00Z",
+      "visibility": "public",
+      "tenant": null,
+      "required_auth": null,
+      "digest": null,
+      "source_commit": null,
+      "enabled": true
     }
-  ]
+  ],
+  "change_log": []
 }

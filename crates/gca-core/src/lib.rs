@@ -12,8 +12,9 @@ pub use headings::{
     Heading, build_heading_index, extract_markdown_headings, repeated_heading_index_workload,
 };
 pub use model::{
-    BUILTIN_CONCEPT_IDS, Catalog, CatalogRepo, ConceptDescriptor, InstructionDescriptor,
-    RepoAgentManifest, RepoIndex, ReuseDescriptor, SCHEMA_VERSION_V1, SourceStats,
-    ValidationDescriptor, WorkflowDescriptor, builtin_concepts,
+    AuthKind, BUILTIN_CONCEPT_IDS, Catalog, CatalogAction, CatalogChange, CatalogRepo,
+    ConceptDescriptor, IndexVisibility, InstructionDescriptor, RepoAgentManifest, RepoId,
+    RepoIndex, ReuseDescriptor, SCHEMA_VERSION_V1, SourceStats, ValidationDescriptor,
+    WorkflowDescriptor, builtin_concepts,
 };
 pub use registry::{Registry, RegistryEntry, RegistryError, load_registry, write_registry};

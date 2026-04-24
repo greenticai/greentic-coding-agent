@@ -339,6 +339,7 @@ Pull/push/update logic for:
 Lightweight discovery record.
 
 Fields:
+- repo_id
 - repo_name
 - org
 - default_branch
@@ -364,6 +365,8 @@ Full heavy index.
 
 Sections:
 - identity
+  - repo_id
+  - repo_name
 - concept_graph
 - workflow_graph
 - ownership_graph
@@ -567,6 +570,7 @@ ghcr.io/greenticai/indexes/catalog:latest
 `greentic.agent.catalog.v1`
 
 Catalog entries:
+- repo_id
 - repo_name
 - org
 - repo_role
@@ -582,6 +586,35 @@ Catalog entries:
 ### Catalog update strategy
 **Recommended:** use a separate builder workflow/repo to regenerate the catalog from published repo manifests.  
 Do not require each repo to write to the catalog directly.
+
+## Implemented Integration Surface
+
+The current implementation ties repo-local analysis, local Tantivy indexing, GHCR/ORAS package publication, public and tenant catalogs, sync-state recovery, merged index rebuilds, MCP stdio, HTTP serving, and watcher-driven refresh into one flow.
+
+Primary docs:
+
+- `docs/catalogs.md`
+- `docs/tenant-indexes.md`
+- `docs/server.md`
+- `docs/ghcr-format.md`
+- `docs/workflow-installation.md`
+
+Compatibility matrix:
+
+| Input type | Old `repo_name` only | New `repo_id` |
+| --- | --- | --- |
+| repo manifest | read with warning | canonical |
+| repo index | read with warning | canonical |
+| catalog | read with warning | canonical |
+| registry | migrate on write | canonical |
+| package/cache path | read old path | write new org/repo path |
+| search/MCP response | add repo_id | canonical |
+
+Exact legacy catalog warning:
+
+```text
+legacy repo_name-only input: repo_id missing; using inferred repo_id unknown/<repo_name> for this version
+```
 
 ---
 
