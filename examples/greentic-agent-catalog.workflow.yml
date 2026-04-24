@@ -1,0 +1,47 @@
+name: Greentic Agent Catalog
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - ".greentic-agent/catalogs/**"
+      - ".github/workflows/greentic-agent-catalog.yml"
+  schedule:
+    - cron: "31 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    env:
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Build greentic-coding-agent
+        run: cargo build --release --package greentic-coding-agent
+
+      - name: Validate public catalog
+        run: ./target/release/greentic-coding-agent catalog validate --format json | tee .greentic-agent-catalog-validate.json
+
+      - name: Publish public catalog to GHCR
+        run: ./target/release/greentic-coding-agent catalog publish --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-catalog-publish.json
+
+      - name: Upload catalog summaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: greentic-agent-catalog-summary
+          path: |
+            .greentic-agent-catalog-validate.json
+            .greentic-agent-catalog-publish.json

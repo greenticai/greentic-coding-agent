@@ -305,7 +305,9 @@ mod tests {
     fn demo_repo_index() -> RepoIndex {
         let manifest = RepoAgentManifest {
             version: "v1".to_string(),
+            repo_id: "greenticai/greentic-coding-agent".to_string(),
             repo_name: "greentic-coding-agent".to_string(),
+            org: Some("greenticai".to_string()),
             repo_root: "/tmp/demo".to_string(),
             repo_role: RepoRole::CliLauncher,
             primary_language: "rust".to_string(),
@@ -316,6 +318,7 @@ mod tests {
 
         RepoIndex {
             version: "v1".to_string(),
+            repo_id: manifest.repo_id.clone(),
             repo_name: manifest.repo_name.clone(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "unix:1".to_string(),

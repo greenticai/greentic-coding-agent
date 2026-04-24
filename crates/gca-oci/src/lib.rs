@@ -1,16 +1,24 @@
+pub mod oras;
+
 use gca_agent_files::render_generated_files;
 use gca_core::{Catalog, CatalogRepo, RepoIndex, SCHEMA_VERSION_V1};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+pub use oras::{OrasError, oras_login, oras_pull, oras_push};
 
 const OCI_LAYOUT_VERSION: &str = "1.0.0";
 const LOCAL_INDEX_DIR: &str = ".greentic-agent";
 const GENERATOR_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const DEFAULT_PUBLIC_CATALOG_REF: &str = "ghcr.io/greenticai/indexes/catalog:latest";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageMetadata {
+    pub repo_id: String,
     pub repo_name: String,
     pub tag: String,
     pub reference: String,
@@ -28,6 +36,7 @@ pub struct PackageOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteRepo {
+    pub repo_id: String,
     pub repo_name: String,
     pub tags: Vec<String>,
 }
@@ -46,13 +55,202 @@ pub struct RefreshCheck {
     pub indexed_schema_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteBackendKind {
+    LocalFixture,
+    GhcrOras,
+}
+
+impl RemoteBackendKind {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "local" | "local_fixture" => Ok(Self::LocalFixture),
+            "ghcr" | "ghcr_oras" => Ok(Self::GhcrOras),
+            other => Err(format!("unsupported remote backend: {other}")),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegistryAuth {
+    pub registry: String,
+    pub username: Option<String>,
+    pub token: String,
+}
+
+impl fmt::Debug for RegistryAuth {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegistryAuth")
+            .field("registry", &self.registry)
+            .field("username", &self.username)
+            .field("token", &"[redacted]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteConfig {
+    pub backend: RemoteBackendKind,
+    pub public_catalog_ref: String,
+    pub tenant: Option<String>,
+    pub tenant_catalog_ref: Option<String>,
+    pub auth: Option<RegistryAuth>,
+    pub strict: bool,
+    pub public_only: bool,
+    pub private_only: bool,
+    pub include_private: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteConfigInput {
+    pub backend: Option<RemoteBackendKind>,
+    pub catalog: Option<String>,
+    pub tenant: Option<String>,
+    pub tenant_catalog: Option<String>,
+    pub token: Option<String>,
+    pub token_env: Option<String>,
+    pub strict: bool,
+    pub public_only: bool,
+    pub private_only: bool,
+    pub include_private: bool,
+}
+
+pub trait RemoteIndexBackend {
+    fn pull(
+        &self,
+        reference: &str,
+        out_dir: &Path,
+        auth: Option<&RegistryAuth>,
+    ) -> Result<(), String>;
+    fn push(&self, reference: &str, dir: &Path, auth: Option<&RegistryAuth>) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalFixtureBackend {
+    pub remote_root: PathBuf,
+}
+
+impl RemoteIndexBackend for LocalFixtureBackend {
+    fn pull(
+        &self,
+        reference: &str,
+        out_dir: &Path,
+        _auth: Option<&RegistryAuth>,
+    ) -> Result<(), String> {
+        copy_dir_all(&self.remote_root.join(reference), out_dir).map_err(|error| error.to_string())
+    }
+
+    fn push(
+        &self,
+        reference: &str,
+        dir: &Path,
+        _auth: Option<&RegistryAuth>,
+    ) -> Result<(), String> {
+        copy_dir_all(dir, &self.remote_root.join(reference)).map_err(|error| error.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GhcrOrasBackend;
+
+impl RemoteIndexBackend for GhcrOrasBackend {
+    fn pull(
+        &self,
+        reference: &str,
+        out_dir: &Path,
+        auth: Option<&RegistryAuth>,
+    ) -> Result<(), String> {
+        oras_pull(reference, out_dir, auth).map_err(|error| error.to_string())
+    }
+
+    fn push(&self, reference: &str, dir: &Path, auth: Option<&RegistryAuth>) -> Result<(), String> {
+        oras_push(reference, dir, auth).map_err(|error| error.to_string())
+    }
+}
+
+pub fn resolve_remote_config_from(
+    input: RemoteConfigInput,
+    env: &BTreeMap<String, String>,
+) -> Result<RemoteConfig, String> {
+    let tenant = input
+        .tenant
+        .or_else(|| env.get("GREENTIC_AGENT_TENANT").cloned());
+    let public_catalog_ref = input
+        .catalog
+        .or_else(|| env.get("GREENTIC_AGENT_CATALOG").cloned())
+        .unwrap_or_else(|| DEFAULT_PUBLIC_CATALOG_REF.to_string());
+    let tenant_catalog_ref = input
+        .tenant_catalog
+        .or_else(|| env.get("GREENTIC_AGENT_TENANT_CATALOG").cloned())
+        .or_else(|| {
+            tenant
+                .as_ref()
+                .map(|tenant| default_tenant_catalog_ref(tenant))
+        });
+    let token = if let Some(token) = input.token {
+        Some(token)
+    } else if let Some(env_name) = input.token_env {
+        env.get(&env_name).cloned()
+    } else {
+        env.get("GREENTIC_AGENT_TOKEN")
+            .cloned()
+            .or_else(|| env.get("GHCR_TOKEN").cloned())
+    };
+
+    Ok(RemoteConfig {
+        backend: input.backend.unwrap_or(RemoteBackendKind::LocalFixture),
+        public_catalog_ref,
+        tenant,
+        tenant_catalog_ref,
+        auth: token.map(|token| RegistryAuth {
+            registry: "ghcr.io".to_string(),
+            username: Some("greentic-agent".to_string()),
+            token,
+        }),
+        strict: input.strict,
+        public_only: input.public_only,
+        private_only: input.private_only,
+        include_private: input.include_private,
+    })
+}
+
+pub fn merge_catalogs(public_catalog: Catalog, tenant_catalog: Option<Catalog>) -> Catalog {
+    let mut repos = BTreeMap::new();
+    let mut change_log = public_catalog.change_log;
+    for repo in public_catalog.repos {
+        repos.insert(repo.repo_id.clone(), repo);
+    }
+    let generated_at = tenant_catalog
+        .as_ref()
+        .map(|catalog| catalog.generated_at.clone())
+        .unwrap_or_else(|| public_catalog.generated_at.clone());
+    if let Some(tenant_catalog) = tenant_catalog {
+        change_log.extend(tenant_catalog.change_log);
+        for repo in tenant_catalog.repos {
+            repos.insert(repo.repo_id.clone(), repo);
+        }
+    }
+    Catalog {
+        version: public_catalog.version,
+        generated_at,
+        repos: repos.into_values().collect(),
+        change_log,
+    }
+}
+
+pub fn default_tenant_catalog_ref(tenant: &str) -> String {
+    format!("ghcr.io/greenticai/indexes/tenants/{tenant}/catalog:latest")
+}
+
 pub fn package_index(
     repo_root: &Path,
     repo_index: &RepoIndex,
     tag: &str,
     output_root: &Path,
 ) -> std::io::Result<PackageOutput> {
-    let package_dir = output_root.join(&repo_index.repo_name).join(tag);
+    let package_dir = repo_id_path(output_root, &repo_index.repo_id).join(tag);
     let artifacts_dir = package_dir.join("artifacts");
     let agents_dir = artifacts_dir.join("agents");
     let blobs_dir = package_dir.join("blobs").join("sha256");
@@ -80,11 +278,9 @@ pub fn package_index(
         files.push(format!("agents/{}", file.file_name));
     }
 
-    let reference = format!(
-        "ghcr.io/greenticai/indexes/{}:{}",
-        repo_index.repo_name, tag
-    );
+    let reference = format!("ghcr.io/greenticai/indexes/{}:{}", repo_index.repo_id, tag);
     let metadata = PackageMetadata {
+        repo_id: repo_index.repo_id.clone(),
         repo_name: repo_index.repo_name.clone(),
         tag: tag.to_string(),
         reference: reference.clone(),
@@ -148,7 +344,7 @@ pub fn publish_local_package(
     repo_name: &str,
     tag: &str,
 ) -> std::io::Result<PathBuf> {
-    let target = remote_root.join(repo_name).join(tag);
+    let target = repo_id_path(remote_root, repo_name).join(tag);
     copy_dir_all(package_dir, &target)?;
     Ok(target)
 }
@@ -159,36 +355,20 @@ pub fn sync_local_package(
     repo_name: &str,
     tag: &str,
 ) -> std::io::Result<PathBuf> {
-    let source = remote_root.join(repo_name).join(tag);
-    let target = cache_root.join(repo_name).join(tag);
+    let source = repo_id_path(remote_root, repo_name).join(tag);
+    let target = repo_id_path(cache_root, repo_name).join(tag);
     copy_dir_all(&source, &target)?;
     Ok(target)
 }
 
 pub fn list_remote_repos(remote_root: &Path) -> std::io::Result<Vec<RemoteRepo>> {
-    let Ok(entries) = fs::read_dir(remote_root) else {
+    if fs::read_dir(remote_root).is_err() {
         return Ok(Vec::new());
-    };
+    }
 
     let mut repos = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let repo_name = entry.file_name().to_string_lossy().to_string();
-        let mut tags = Vec::new();
-        if let Ok(tag_entries) = fs::read_dir(&path) {
-            for tag_entry in tag_entries.flatten() {
-                if tag_entry.path().is_dir() {
-                    tags.push(tag_entry.file_name().to_string_lossy().to_string());
-                }
-            }
-        }
-        tags.sort();
-        repos.push(RemoteRepo { repo_name, tags });
-    }
-    repos.sort_by(|left, right| left.repo_name.cmp(&right.repo_name));
+    collect_remote_repos(remote_root, remote_root, &mut repos)?;
+    repos.sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
     Ok(repos)
 }
 
@@ -202,43 +382,74 @@ pub fn build_catalog(remote_root: &Path) -> std::io::Result<Catalog> {
         };
         let repo_index = load_repo_index(
             &remote_root
-                .join(&repo.repo_name)
+                .join(&repo.repo_id)
                 .join(&latest_tag)
                 .join("artifacts")
                 .join("repo-index.json"),
         )?;
         catalog_repos.push(CatalogRepo {
+            repo_id: repo.repo_id,
             repo_name: repo.repo_name,
             repo_role: repo_index.repo_role,
             latest_tag: latest_tag.clone(),
             package_ref: format!(
                 "ghcr.io/greenticai/indexes/{}:{}",
-                repo_index.repo_name, latest_tag
+                repo_index.repo_id, latest_tag
             ),
             updated_at: repo_index.generated_at,
+            visibility: gca_core::IndexVisibility::Public,
+            tenant: None,
+            required_auth: None,
+            digest: None,
+            source_commit: None,
+            enabled: true,
         });
     }
 
-    catalog_repos.sort_by(|left, right| left.repo_name.cmp(&right.repo_name));
+    catalog_repos.sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
     Ok(Catalog {
         version: SCHEMA_VERSION_V1.to_string(),
         generated_at: timestamp_string(),
         repos: catalog_repos,
+        change_log: Vec::new(),
     })
 }
 
 pub fn sync_catalog(remote_root: &Path, cache_root: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let catalog = build_catalog(remote_root)?;
+    let catalog = match load_published_catalog(remote_root)? {
+        Some(catalog) => catalog,
+        None => build_catalog(remote_root)?,
+    };
     let mut synced = Vec::new();
     for repo in catalog.repos {
+        if !repo.enabled {
+            continue;
+        }
         synced.push(sync_local_package(
             remote_root,
             cache_root,
-            &repo.repo_name,
+            &repo.repo_id,
             &repo.latest_tag,
         )?);
     }
     Ok(synced)
+}
+
+fn load_published_catalog(remote_root: &Path) -> std::io::Result<Option<Catalog>> {
+    let catalog_path = remote_root
+        .join("catalogs")
+        .join("public")
+        .join("catalog.json");
+    if !catalog_path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(catalog_path)?;
+    let mut catalog: Catalog = serde_json::from_str(&raw)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    catalog
+        .repos
+        .sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
+    Ok(Some(catalog))
 }
 
 pub fn check_refresh(repo_root: &Path) -> std::io::Result<RefreshCheck> {
@@ -330,7 +541,7 @@ pub fn render_github_workflow() -> String {
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
@@ -342,6 +553,8 @@ permissions:
 jobs:
   index:
     runs-on: ubuntu-latest
+    env:
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -349,20 +562,29 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Build greentic-coding-agent
+        run: cargo build --release --package greentic-coding-agent
+
       - name: Analyze repo
-        run: cargo run --package greentic-coding-agent -- analyze --print --format json | tee .greentic-agent-analyze.json
+        run: ./target/release/greentic-coding-agent analyze --print --format json | tee .greentic-agent-analyze.json
 
       - name: Check refresh
-        run: cargo run --package greentic-coding-agent -- check-refresh --format json | tee .greentic-agent-refresh.json
+        run: ./target/release/greentic-coding-agent check-refresh --format json | tee .greentic-agent-refresh.json
+
+      - name: Build local Tantivy index
+        run: ./target/release/greentic-coding-agent search --engine auto --mode concept greentic --format json
 
       - name: Package index
-        run: cargo run --package greentic-coding-agent -- package-index --tag latest --format json | tee .greentic-agent-package.json
+        run: ./target/release/greentic-coding-agent package-index --tag latest --format json | tee .greentic-agent-package.json
 
-      - name: Publish index when refresh is needed
+      - name: Publish index to GHCR when refresh is needed
         shell: bash
         run: |
-          if cargo run --package greentic-coding-agent -- check-refresh --format json | grep -q '"needs_refresh": true'; then
-            cargo run --package greentic-coding-agent -- publish-index --tag latest --format json | tee .greentic-agent-publish.json
+          if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
+            ./target/release/greentic-coding-agent publish-index --tag latest --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
           else
             echo '{"published": false, "reason": "refresh not required"}' | tee .greentic-agent-publish.json
           fi
@@ -390,6 +612,50 @@ fn copy_dir_all(source: &Path, target: &Path) -> std::io::Result<()> {
             copy_dir_all(&source_path, &target_path)?;
         } else {
             fs::copy(&source_path, &target_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn repo_id_path(root: &Path, repo_id: &str) -> PathBuf {
+    let mut path = root.to_path_buf();
+    for part in repo_id.split('/') {
+        path.push(part);
+    }
+    path
+}
+
+fn collect_remote_repos(
+    remote_root: &Path,
+    current: &Path,
+    repos: &mut Vec<RemoteRepo>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        if path.join("artifacts").join("repo-index.json").exists() {
+            let Ok(relative) = current.strip_prefix(remote_root) else {
+                continue;
+            };
+            let repo_id = relative.display().to_string();
+            let repo_name = repo_id.rsplit('/').next().unwrap_or(&repo_id).to_string();
+            let tag = entry.file_name().to_string_lossy().to_string();
+            if let Some(existing) = repos.iter_mut().find(|repo| repo.repo_id == repo_id) {
+                existing.tags.push(tag);
+                existing.tags.sort();
+            } else {
+                repos.push(RemoteRepo {
+                    repo_id,
+                    repo_name,
+                    tags: vec![tag],
+                });
+            }
+        } else {
+            collect_remote_repos(remote_root, &path, repos)?;
         }
     }
     Ok(())
@@ -499,14 +765,17 @@ fn timestamp_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_catalog, check_refresh, install_github_workflow, list_remote_repos, package_index,
-        publish_local_package, sync_catalog, sync_local_package,
+        DEFAULT_PUBLIC_CATALOG_REF, RemoteBackendKind, RemoteConfigInput, build_catalog,
+        check_refresh, default_tenant_catalog_ref, install_github_workflow, list_remote_repos,
+        merge_catalogs, package_index, publish_local_package, resolve_remote_config_from,
+        sync_catalog, sync_local_package,
     };
     use gca_core::{
         ConceptDescriptor, FreshnessStatus, InstructionDescriptor, KnowledgeScope, LifecyclePhase,
         RepoAgentManifest, RepoIndex, RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor,
         WorkflowDescriptor,
     };
+    use std::collections::BTreeMap;
     use std::fs;
     use tempfile::tempdir;
 
@@ -644,6 +913,74 @@ mod tests {
     }
 
     #[test]
+    fn sync_catalog_skips_disabled_published_entries() {
+        let temp = tempdir().unwrap();
+        let remote_root = temp.path().join("remote");
+        let cache_root = temp.path().join("cache");
+
+        for repo_name in ["alpha-repo", "beta-repo"] {
+            let repo_root = temp.path().join(repo_name);
+            fs::create_dir_all(repo_root.join(".greentic-agent")).unwrap();
+            fs::write(repo_root.join(".greentic-agent/manifest.json"), "{}").unwrap();
+            let repo_index = demo_repo_index_named(repo_name);
+            fs::write(
+                repo_root.join(".greentic-agent/repo-index.json"),
+                serde_json::to_string_pretty(&repo_index).unwrap(),
+            )
+            .unwrap();
+            let output = package_index(
+                &repo_root,
+                &repo_index,
+                "latest",
+                &repo_root.join(".greentic-agent/oci"),
+            )
+            .unwrap();
+            publish_local_package(
+                &output.package_dir,
+                &remote_root,
+                &repo_index.repo_id,
+                "latest",
+            )
+            .unwrap();
+        }
+
+        let mut catalog = build_catalog(&remote_root).unwrap();
+        catalog
+            .repos
+            .iter_mut()
+            .find(|repo| repo.repo_name == "beta-repo")
+            .unwrap()
+            .enabled = false;
+        let catalog_path = remote_root
+            .join("catalogs")
+            .join("public")
+            .join("catalog.json");
+        fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
+        fs::write(
+            &catalog_path,
+            serde_json::to_string_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+
+        let synced = sync_catalog(&remote_root, &cache_root).unwrap();
+        assert_eq!(synced.len(), 1);
+        assert!(
+            cache_root
+                .join("greenticai")
+                .join("alpha-repo")
+                .join("latest")
+                .exists()
+        );
+        assert!(
+            !cache_root
+                .join("greenticai")
+                .join("beta-repo")
+                .join("latest")
+                .exists()
+        );
+    }
+
+    #[test]
     fn check_refresh_reports_explicit_reasons() {
         let temp = tempdir().unwrap();
         let repo_root = temp.path().join("repo");
@@ -737,14 +1074,104 @@ mod tests {
         assert_eq!(expected, super::render_github_workflow());
     }
 
+    #[test]
+    fn remote_config_resolves_cli_env_and_defaults() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "GREENTIC_AGENT_CATALOG".to_string(),
+            "ghcr.io/custom/catalog:latest".to_string(),
+        );
+        env.insert("GREENTIC_AGENT_TENANT".to_string(), "meeza".to_string());
+        env.insert("GHCR_TOKEN".to_string(), "ghcr-secret".to_string());
+
+        let config = resolve_remote_config_from(
+            RemoteConfigInput {
+                backend: Some(RemoteBackendKind::GhcrOras),
+                token: Some("cli-secret".to_string()),
+                strict: true,
+                ..RemoteConfigInput::default()
+            },
+            &env,
+        )
+        .unwrap();
+
+        assert_eq!(config.backend, RemoteBackendKind::GhcrOras);
+        assert_eq!(config.public_catalog_ref, "ghcr.io/custom/catalog:latest");
+        assert_eq!(config.tenant.as_deref(), Some("meeza"));
+        assert_eq!(
+            config.tenant_catalog_ref.as_deref(),
+            Some("ghcr.io/greenticai/indexes/tenants/meeza/catalog:latest")
+        );
+        assert_eq!(config.auth.as_ref().unwrap().token, "cli-secret");
+        assert!(!format!("{:?}", config.auth.as_ref().unwrap()).contains("cli-secret"));
+        assert!(config.strict);
+    }
+
+    #[test]
+    fn remote_config_uses_defaults_without_env() {
+        let config =
+            resolve_remote_config_from(RemoteConfigInput::default(), &BTreeMap::new()).unwrap();
+
+        assert_eq!(config.backend, RemoteBackendKind::LocalFixture);
+        assert_eq!(config.public_catalog_ref, DEFAULT_PUBLIC_CATALOG_REF);
+        assert_eq!(
+            default_tenant_catalog_ref("meeza"),
+            "ghcr.io/greenticai/indexes/tenants/meeza/catalog:latest"
+        );
+        assert!(config.auth.is_none());
+    }
+
+    #[test]
+    fn tenant_catalog_overrides_public_catalog_entries() {
+        let mut public = build_catalog_fixture("unix:1");
+        public.repos[0].repo_id = "greenticai/shared".to_string();
+        public.repos[0].repo_name = "shared".to_string();
+        public.repos[0].package_ref = "public".to_string();
+
+        let mut tenant = build_catalog_fixture("unix:2");
+        tenant.repos[0].repo_id = "greenticai/shared".to_string();
+        tenant.repos[0].repo_name = "shared".to_string();
+        tenant.repos[0].package_ref = "tenant".to_string();
+
+        let merged = merge_catalogs(public, Some(tenant));
+
+        assert_eq!(merged.generated_at, "unix:2");
+        assert_eq!(merged.repos.len(), 1);
+        assert_eq!(merged.repos[0].package_ref, "tenant");
+    }
+
     fn demo_repo_index() -> RepoIndex {
         demo_repo_index_named("greentic-coding-agent")
+    }
+
+    fn build_catalog_fixture(generated_at: &str) -> gca_core::Catalog {
+        gca_core::Catalog {
+            version: "v1".to_string(),
+            generated_at: generated_at.to_string(),
+            repos: vec![gca_core::CatalogRepo {
+                repo_id: "greenticai/demo".to_string(),
+                repo_name: "demo".to_string(),
+                repo_role: RepoRole::DemoApp,
+                latest_tag: "latest".to_string(),
+                package_ref: "ghcr.io/greenticai/indexes/greenticai/demo:latest".to_string(),
+                updated_at: generated_at.to_string(),
+                visibility: gca_core::IndexVisibility::Public,
+                tenant: None,
+                required_auth: None,
+                digest: None,
+                source_commit: None,
+                enabled: true,
+            }],
+            change_log: Vec::new(),
+        }
     }
 
     fn demo_repo_index_named(repo_name: &str) -> RepoIndex {
         let manifest = RepoAgentManifest {
             version: "v1".to_string(),
+            repo_id: format!("greenticai/{repo_name}"),
             repo_name: repo_name.to_string(),
+            org: Some("greenticai".to_string()),
             repo_root: format!("/tmp/{repo_name}"),
             repo_role: RepoRole::CliLauncher,
             primary_language: "rust".to_string(),
@@ -755,6 +1182,7 @@ mod tests {
 
         RepoIndex {
             version: "v1".to_string(),
+            repo_id: manifest.repo_id.clone(),
             repo_name: manifest.repo_name.clone(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "unix:1".to_string(),

@@ -1,0 +1,35 @@
+{
+  "version": "v1",
+  "generated_at": "2026-04-24T00:00:00Z",
+  "repos": [
+    {
+      "repo_id": "greenticai/greentic-types",
+      "repo_name": "greentic-types",
+      "repo_role": "core_contracts",
+      "latest_tag": "latest",
+      "package_ref": "ghcr.io/greenticai/indexes/greenticai/greentic-types:latest",
+      "updated_at": "2026-04-24T00:00:00Z",
+      "visibility": "public",
+      "tenant": null,
+      "required_auth": null,
+      "digest": null,
+      "source_commit": null,
+      "enabled": true
+    },
+    {
+      "repo_id": "greentic-biz/greentic-demo",
+      "repo_name": "greentic-demo",
+      "repo_role": "demo_app",
+      "latest_tag": "latest",
+      "package_ref": "ghcr.io/greenticai/indexes/greentic-biz/greentic-demo:latest",
+      "updated_at": "2026-04-24T00:00:00Z",
+      "visibility": "public",
+      "tenant": null,
+      "required_auth": null,
+      "digest": null,
+      "source_commit": null,
+      "enabled": true
+    }
+  ],
+  "change_log": []
+}

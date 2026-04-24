@@ -2,7 +2,7 @@ name: Greentic Agent Index
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
@@ -14,6 +14,8 @@ permissions:
 jobs:
   index:
     runs-on: ubuntu-latest
+    env:
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,20 +23,29 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Build greentic-coding-agent
+        run: cargo build --release --package greentic-coding-agent
+
       - name: Analyze repo
-        run: cargo run --package greentic-coding-agent -- analyze --print --format json | tee .greentic-agent-analyze.json
+        run: ./target/release/greentic-coding-agent analyze --print --format json | tee .greentic-agent-analyze.json
 
       - name: Check refresh
-        run: cargo run --package greentic-coding-agent -- check-refresh --format json | tee .greentic-agent-refresh.json
+        run: ./target/release/greentic-coding-agent check-refresh --format json | tee .greentic-agent-refresh.json
+
+      - name: Build local Tantivy index
+        run: ./target/release/greentic-coding-agent search --engine auto --mode concept greentic --format json
 
       - name: Package index
-        run: cargo run --package greentic-coding-agent -- package-index --tag latest --format json | tee .greentic-agent-package.json
+        run: ./target/release/greentic-coding-agent package-index --tag latest --format json | tee .greentic-agent-package.json
 
-      - name: Publish index when refresh is needed
+      - name: Publish index to GHCR when refresh is needed
         shell: bash
         run: |
-          if cargo run --package greentic-coding-agent -- check-refresh --format json | grep -q '"needs_refresh": true'; then
-            cargo run --package greentic-coding-agent -- publish-index --tag latest --format json | tee .greentic-agent-publish.json
+          if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
+            ./target/release/greentic-coding-agent publish-index --tag latest --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
           else
             echo '{"published": false, "reason": "refresh not required"}' | tee .greentic-agent-publish.json
           fi

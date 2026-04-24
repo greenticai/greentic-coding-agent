@@ -1,0 +1,56 @@
+# Greentic Coding Agent Bootstrap
+
+Detected repo: `{{repo_id}}`
+
+You are working in a Greentic repository. Use the local coding-agent index before making changes.
+
+## First commands
+
+```bash
+{{describe_command}}
+{{sync_public_command}}
+{{search_command}}
+```
+
+Run or refresh the local index with:
+
+```bash
+{{analyze_command}}
+```
+
+## Long-lived local server
+
+`serve` defaults to MCP over stdio for coding agents. To be explicit:
+
+```bash
+{{mcp_server_command}}
+```
+
+For a local HTTP JSON API, bind to localhost:
+
+```bash
+{{http_server_command}}
+```
+
+## Tenant/private indexes
+
+Use token environment variables, not inline token values:
+
+```bash
+{{tenant_sync_command}}
+{{tenant_server_command}}
+```
+
+## Install nightly GHCR indexing workflow
+
+```bash
+{{install_workflow_command}}
+```
+
+## Operating rules
+
+- Always call `describe --here` first.
+- Search before creating new abstractions.
+- Run `impact` before editing shared contracts.
+- Run `required-validations` before finishing.
+- Do not duplicate concepts that have a known owner repo.
