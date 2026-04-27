@@ -1,178 +1,239 @@
-# greentic-coding-agent
+# Greentic Coding Agent
 
-`greentic-coding-agent` is the dedicated Greentic repository for coding-agent tooling. Its long-term direction is a Rust CLI and MCP-backed knowledge layer that helps coding agents orient in Greentic repos quickly, follow reuse rules, and generate consistent agent-facing guidance.
+Greentic Coding Agent helps people and AI coding agents understand Greentic repositories quickly.
 
-The architecture and planned feature sequence are documented in [docs/architecture.md](docs/architecture.md). This repository is intentionally separate from `greentic-dev`: `greentic-dev` is expected to stay a launcher, while `greentic-coding-agent` owns the actual product logic, data model, indexing, and agent-facing workflows.
+It reads a repository, builds a local knowledge index, and answers questions such as:
 
-## Current Status
+- What is this repository for?
+- Which concepts, workflows, courses, and knowledge updates apply here?
+- What commands should I run for this task?
+- Which repo owns a concept?
+- What validation is required before changing something?
+- What recent guidance has changed?
 
-- Cargo workspace with implemented crates for CLI, core types, indexing, query, Greentic enrichment, agent-file generation, OCI-style local packaging/sync, and MCP-style helper responses.
-- Working CLI commands for `analyze`, `bootstrap-instructions`, `describe --here`, `concepts`, `workflows`, `search`, `locate-owner`, `required-validations`, `generate-agent-files`, `package-index`, `publish-index`, `catalog`, `sync`, `rebuild-merged-index`, `watch-indexes`, `show-catalog`, `check-refresh`, `install-github-workflow`, `impact`, `detect-changes`, `validate-plan`, and `serve`.
-- Seeded adapter knowledge for `greentic-types`, `greentic-pack`, `greentic-bundle`, `greentic-dev`, `greentic-x`, and `greentic-sorla`.
-- CI, release, package validation, perf smoke checks, and nightly coverage hooks.
+It can also generate agent-facing files such as `AGENTS.md`, `CODEX.md`, `CLAUDE.md`, and `llms.txt`.
 
-## Workspace Layout
+For repository administrators, setup and rollout instructions are in [ADMIN.md](ADMIN.md).
 
-```text
-crates/
-  gca-cli/
-  gca-core/
-  gca-index/
-  gca-query/
-  gca-greentic/
-  gca-agent-files/
-  gca-oci/
-  gca-mcp/
-schemas/
-templates/
-docs/
-.codex/
+## Who This Is For
+
+### Non-Technical Users
+
+Use this tool when you want an AI coding agent to work more safely in a Greentic repo.
+
+Instead of asking the agent to guess how the repo works, ask it to use Greentic Coding Agent first. The tool gives the agent a structured summary of the repo, the important workflows, and any current instructions or warnings.
+
+You usually do not need to understand the generated JSON files. The important outcome is that the agent has better context before it edits code.
+
+### Developers
+
+Use this tool locally when you are working in a Greentic repository and want indexed repo knowledge, command guidance, search, generated agent files, or cross-repo context.
+
+### Coding Agents
+
+Use this tool as your first orientation step in a Greentic repo. Prefer its structured outputs over guessing from filenames alone.
+
+Recommended first calls:
+
+```bash
+greentic-coding-agent describe --here --format json
+greentic-coding-agent concepts --format json
+greentic-coding-agent workflows --format json
+greentic-coding-agent updates --new --format json
 ```
 
-## Local vs Remote Model
+For task-specific work:
 
-- Local-first: the CLI is intended to analyze the current checkout and write repo-local outputs.
-- Remote-aware: repo indexes can be packaged, published to GHCR with ORAS, discovered through public or tenant catalogs, synced into a user-global cache, and queried through a merged Tantivy index.
-- Server-ready: `serve --mcp`, `serve --stdio`, and `serve --http` expose the same query service used by the CLI.
+```bash
+greentic-coding-agent search --mode instruction "<task or keyword>" --format json
+greentic-coding-agent locate-owner --concept <concept_id> --format json
+greentic-coding-agent required-validations --task "<task>" --format json
+greentic-coding-agent validate-plan examples/plan.v1.json --format json
+```
 
-More detail:
+## What It Creates
 
-- [Catalogs](docs/catalogs.md)
-- [Tenant indexes](docs/tenant-indexes.md)
-- [Server](docs/server.md)
-- [GHCR format](docs/ghcr-format.md)
-- [Workflow installation](docs/workflow-installation.md)
+Running `analyze` creates repo-local files under:
 
-## Seeded Adapters
+```text
+.greentic-agent/
+```
 
-The repo now includes curated seeded adapters for a first set of high-value Greentic repositories:
+These files contain the repository manifest, enriched repo index, fingerprints, local search index, generated agent files, and packaging data. They are intended for tooling and agents.
 
-- `greentic-types`
-- `greentic-pack`
-- `greentic-bundle`
-- `greentic-dev`
-- `greentic-x`
-- `greentic-sorla`
+Generated human/agent files are written under:
 
-These adapters live in `crates/gca-greentic/src/lib.rs` and currently enrich:
+```text
+.greentic-agent/generated/
+```
 
-- repo role
-- concept ownership hints
-- repo-specific workflows
-- docs of interest for those repos
+You can also mirror generated files to the repository root:
 
-To add another adapter, follow the existing `SEEDED_ADAPTERS` pattern:
+```bash
+greentic-coding-agent generate-agent-files --write-root
+```
 
-1. Add a new `SeededAdapter` entry with a repo name, role, docs, concepts, and workflows.
-2. Add or reuse seeded concept ownership in `seeded_concept` / `concept_owners`.
-3. If the adapter implies stable cross-repo ownership, add matching reuse policy entries in `crates/gca-query/src/lib.rs`.
-4. Add a focused test in `crates/gca-greentic` and, if needed, a policy test in `crates/gca-query`.
+That can create or update:
+
+```text
+AGENTS.md
+CODEX.md
+CLAUDE.md
+llms.txt
+```
+
+## Basic Local Use
+
+From inside a Greentic repository:
+
+```bash
+greentic-coding-agent analyze --print --format markdown
+```
+
+Then inspect the repo:
+
+```bash
+greentic-coding-agent describe --here --format markdown
+greentic-coding-agent concepts --format markdown
+greentic-coding-agent workflows --format markdown
+greentic-coding-agent commands --format markdown
+```
+
+Search the indexed knowledge:
+
+```bash
+greentic-coding-agent search --mode instruction wizard --format markdown
+greentic-coding-agent search --mode code analyze_repo --format markdown
+greentic-coding-agent search --mode reuse component --format markdown
+```
+
+List training courses and knowledge updates:
+
+```bash
+greentic-coding-agent courses --format markdown
+greentic-coding-agent course recommend --task "create a component" --format markdown
+greentic-coding-agent updates --format markdown
+greentic-coding-agent updates --new --format markdown
+```
+
+Mark updates as seen after reading them:
+
+```bash
+greentic-coding-agent updates mark-seen <update_id>
+greentic-coding-agent updates mark-seen --all
+```
+
+Generate agent files:
+
+```bash
+greentic-coding-agent generate-agent-files --write-root
+```
+
+## Common Questions
+
+### “What should I run before editing?”
+
+```bash
+greentic-coding-agent describe --here --format markdown
+greentic-coding-agent updates --new --format markdown
+greentic-coding-agent required-validations --task "<your task>" --format markdown
+```
+
+### “Where is this concept owned?”
+
+```bash
+greentic-coding-agent locate-owner --concept component --format markdown
+```
+
+### “What changed recently that agents need to know?”
+
+```bash
+greentic-coding-agent updates --new --format markdown
+```
+
+### “Can this tool serve an agent or MCP-style host?”
+
+Yes. It can serve over stdio or HTTP:
+
+```bash
+greentic-coding-agent serve --stdio
+greentic-coding-agent serve --http --host 127.0.0.1 --port 7757
+```
+
+HTTP mode exposes local endpoints such as health, search, catalog, and sync. See [docs/server.md](docs/server.md).
+
+## Cross-Repo Knowledge
+
+Greentic Coding Agent can package and publish repo indexes, sync public or tenant catalogs, and build a merged local search index.
+
+For local use:
+
+```bash
+greentic-coding-agent sync --format markdown
+greentic-coding-agent search --mode concept --scope merged wizard --format markdown
+```
+
+For repository setup and GHCR/catalog publishing, see [ADMIN.md](ADMIN.md).
+
+## What The Index Contains
+
+The index includes:
+
+- repo identity and role
+- concepts and workflow graph
+- source statistics and Rust symbols
+- Cargo workspace/package/dependency metadata
+- markdown docs and GitHub workflow references
+- training courses from `.greentic/training/*.course.v1.json`
+- knowledge updates from `.greentic/updates/*.update.v1.json`
+- reuse and ownership policy
+- required validations
+- generated agent-file content
+
+## Project Layout
+
+```text
+crates/gca-cli          CLI entrypoint
+crates/gca-engine       shared service layer
+crates/gca-core         core data models
+crates/gca-index        repo analysis and index writing
+crates/gca-query        search, catalog, owner, validation, update queries
+crates/gca-agent-files  generated AGENTS/CODEX/CLAUDE/llms renderers
+crates/gca-oci          package, publish, sync, catalog, GHCR helpers
+crates/gca-mcp          MCP-style tool surface
+crates/gca-greentic     Greentic-specific enrichment
+schemas/                CDDL schemas
+examples/               example manifests, indexes, catalogs, courses, updates
+docs/                   deeper implementation docs
+```
 
 ## Local Development
 
-Run the standard local validation wrapper from the repository root:
+Build and test the workspace:
 
 ```bash
 bash ci/local_check.sh
 ```
 
-Try the CLI:
+Run from source:
 
 ```bash
 cargo run -p greentic-coding-agent -- --help
-cargo run -p greentic-coding-agent -- describe --here --format markdown
-cargo run -p greentic-coding-agent -- concepts --format json
-cargo run -p greentic-coding-agent -- workflows --format markdown
-cargo run -p greentic-coding-agent -- search --mode instruction wizard --format json
-cargo run -p greentic-coding-agent -- sync --format json
-cargo run -p greentic-coding-agent -- search --mode concept --scope merged wizard --format json
-cargo run -p greentic-coding-agent -- watch-indexes --once --format json
-cargo run -p greentic-coding-agent -- check-refresh --format json
-cargo run -p greentic-coding-agent -- serve --stdio
-cargo run -p greentic-coding-agent -- serve --http --host 127.0.0.1 --port 7757
-cargo run -p greentic-coding-agent -- validate-plan examples/plan.v1.json --format markdown
+cargo run -p greentic-coding-agent -- analyze --print --format json
 ```
 
-To run only packaging and publish dry-run validation:
+Package-only validation:
 
 ```bash
 bash ci/local_check.sh --mode package
 ```
 
-## Examples
+## More Documentation
 
-Committed example artifacts live under [`examples/`](examples/README.md).
-
-- `examples/greentic-agent-index.workflow.yml`
-  Example output from `install-github-workflow`.
-- `examples/catalog.public.v1.json`, `examples/catalog.tenant.meeza.v1.json`
-  Example public and tenant catalog payloads.
-- `examples/mcp-request.describe-repo.json`, `examples/mcp-request.search-all.json`
-  Example MCP-style request payload for `serve --request-file`.
-- `examples/server-search-request.json`
-  Example HTTP `/search` request body.
-- `examples/plan.v1.json`
-  Example input for `validate-plan`.
-- `examples/repo-manifest.v1.json`, `examples/repo-index.v1.json`, `examples/catalog.v1.json`
-  Example machine-readable outputs for the current schema layer.
-
-## Migration Compatibility
-
-New outputs use `repo_id` in canonical `org/repo` form. Existing `repo_name`-only inputs remain readable for one compatibility version when unambiguous, with this exact warning text for legacy catalog inputs:
-
-```text
-legacy repo_name-only input: repo_id missing; using inferred repo_id unknown/<repo_name> for this version
-```
-
-Compatibility matrix:
-
-| Input type | Old `repo_name` only | New `repo_id` |
-| --- | --- | --- |
-| repo manifest | read with warning | canonical |
-| repo index | read with warning | canonical |
-| catalog | read with warning | canonical |
-| registry | migrate on write | canonical |
-| package/cache path | read old path | write new org/repo path |
-| search/MCP response | add repo_id | canonical |
-
-## CI and Releases
-
-The repository uses a small set of consistent automation entrypoints:
-
-- `ci/local_check.sh`
-  Runs formatting, clippy, tests, build, docs, package content checks, `cargo package`, and `cargo publish --dry-run` for every publishable crate in the workspace.
-- `.github/workflows/ci.yml`
-  Calls the standard `greenticai/.github` host crate CI workflow on pull requests.
-- `.github/workflows/publish.yml`
-  Calls the standard `greenticai/.github` crates publish and release binaries workflows on `v*` tags.
-- `.github/workflows/perf.yml`
-  Runs lightweight concurrency guards and a Criterion smoke benchmark for `gca-core`.
-
-### Relationship to `greentic-dev`
-
-The intended invocation is:
-
-```bash
-gtc dev coding-agent ...
-```
-
-That launcher integration is planned externally in `greentic-dev`. This repository already provides the binary and CLI contract that integration will delegate to.
-
-### How to cut a release
-
-1. Bump the version in the workspace and `crates/gca-cli`.
-2. Run `bash ci/local_check.sh`.
-3. Commit the release changes.
-4. Create and push a matching tag:
-
-```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-Pushing the tag triggers `.github/workflows/publish.yml`.
-
-### Required GitHub secrets
-
-- `CARGO_REGISTRY_TOKEN` for crates.io publication.
-- `GHCR_TOKEN` is optional when the default `GITHUB_TOKEN` has package write access; otherwise provide it for GHCR pushes.
+- [ADMIN.md](ADMIN.md): setup and rollout for Greentic repos
+- [docs/catalogs.md](docs/catalogs.md): public and tenant catalogs
+- [docs/tenant-indexes.md](docs/tenant-indexes.md): tenant index behavior
+- [docs/server.md](docs/server.md): stdio and HTTP serving
+- [docs/ghcr-format.md](docs/ghcr-format.md): GHCR/OCI package format
+- [docs/workflow-installation.md](docs/workflow-installation.md): generated GitHub workflows
+- [docs/training-update-seeds.md](docs/training-update-seeds.md): authored courses and updates

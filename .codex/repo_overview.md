@@ -81,9 +81,9 @@ The previous rewritten PR-01 through PR-12 plan is implemented locally and has b
   - **Key functionality:** Documents reserved template filenames. First-run bootstrap guidance now uses `crates/gca-cli/templates/CODEX_BOOTSTRAP.md.hbs` so the CLI package verifies correctly.
   - **Key dependencies / integration points:** Runtime agent-file generation still uses built-in deterministic renderers.
 
-- **Path:** `README.md`, `examples/README.md`, `docs/training-update-seeds.md`
-  - **Role:** Contributor-facing usage and executable documentation.
-  - **Key functionality:** Document the implemented command surface, seeded adapter model, public/tenant catalog flow, GHCR format, server modes, release flow, training/update seed copy guidance, and runnable example artifacts such as `examples/plan.v1.json`, `examples/greentic-agent-index.workflow.yml`, `examples/greentic-agent-catalog.workflow.yml`, and MCP/HTTP request fixtures.
+- **Path:** `README.md`, `ADMIN.md`, `examples/README.md`, `docs/training-update-seeds.md`
+  - **Role:** User-facing, administrator-facing, contributor-facing, and executable documentation.
+  - **Key functionality:** Document what Greentic Coding Agent does for non-technical users, developers, and coding agents; how admins set it up across Greentic repos for local indexes, generated agent files, GHCR publication, catalogs, and org rollout; plus seeded adapter model, server modes, training/update seed copy guidance, and runnable example artifacts such as `examples/plan.v1.json`, `examples/greentic-agent-index.workflow.yml`, `examples/greentic-agent-catalog.workflow.yml`, and MCP/HTTP request fixtures.
   - **Key dependencies / integration points:** README examples now align with the real CLI, and the committed workflow example is verified against the workflow renderer by tests.
 
 - **Path:** `ci/local_check.sh`, `ci/check_package_contents.sh`
