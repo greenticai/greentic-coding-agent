@@ -1,0 +1,89 @@
+{
+  "version": "v1",
+  "id": "create_application_pack",
+  "title": "Create an Application Pack",
+  "summary": "Create an application pack with explicit app metadata, dependency policy, validations, and catalog-ready packaging.",
+  "owner_repo": "greentic-pack",
+  "teaches_concepts": [
+    "application_pack",
+    "setup",
+    "agent_training_course"
+  ],
+  "tasks": [
+    "create application pack",
+    "build app pack",
+    "package application pack"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "app_manifest",
+      "title": "Author the Application Manifest",
+      "objective": "Describe app identity, setup requirements, and extension dependencies in the pack manifest.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Generate the application-pack scaffold from reviewed answers.",
+          "command": "greentic-pack wizard --kind application --answers answers.json",
+          "expected_output": "Application pack manifest, app source layout, and setup metadata are generated."
+        },
+        {
+          "order": 2,
+          "instruction": "Declare extension dependencies and setup contract versions explicitly.",
+          "command": "greentic-pack doctor",
+          "expected_output": "Doctor accepts dependency and setup metadata.",
+          "validation": "greentic-pack doctor"
+        }
+      ]
+    },
+    {
+      "id": "publish_ready",
+      "title": "Make the Pack Catalog Ready",
+      "objective": "Validate that the app pack can be consumed by bundle assembly and catalog flows.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Package the app pack and inspect the generated artifact metadata.",
+          "command": "greentic-pack build --in .",
+          "expected_output": "A package artifact and manifest summary are produced."
+        },
+        {
+          "order": 2,
+          "instruction": "Run the repository local check before catalog publication.",
+          "command": "bash ci/local_check.sh",
+          "expected_output": "Local CI passes.",
+          "validation": "bash ci/local_check.sh"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-pack wizard --kind application --answers answers.json",
+    "greentic-pack doctor",
+    "greentic-pack build --in .",
+    "bash ci/local_check.sh"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "hand-edit app pack manifest without doctor",
+      "reason": "Application pack manifests feed bundle/catalog automation and must be validated.",
+      "replacement": "greentic-pack doctor"
+    }
+  ],
+  "required_validations": [
+    "greentic-pack doctor",
+    "greentic-pack build --in .",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-pack/create-application-pack.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/create-application-pack.course.v1.json",
+    "examples/training/greentic-pack/create-application-pack.course.v1.json"
+  ]
+}

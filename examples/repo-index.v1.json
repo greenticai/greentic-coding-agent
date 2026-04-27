@@ -90,6 +90,8 @@
       ]
     }
   ],
+  "training_courses": [],
+  "knowledge_updates": [],
   "instruction_graph": [
     {
       "id": "architecture",
@@ -132,6 +134,22 @@
     "public_items": [
       "pub struct RepoIndex",
       "pub fn analyze_repo"
+    ],
+    "rust_symbols": [
+      {
+        "name": "RepoIndex",
+        "kind": "struct",
+        "visibility": "pub",
+        "path": "crates/gca-core/src/model.rs:83",
+        "line": 83
+      },
+      {
+        "name": "analyze_repo",
+        "kind": "function",
+        "visibility": "pub",
+        "path": "crates/gca-index/src/lib.rs:69",
+        "line": 69
+      }
     ],
     "test_targets": [
       "crates/gca-core/tests/examples.rs",

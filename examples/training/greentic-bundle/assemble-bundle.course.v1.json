@@ -1,0 +1,90 @@
+{
+  "version": "v1",
+  "id": "assemble_bundle",
+  "title": "Assemble a Greentic Bundle",
+  "summary": "Assemble a bundle from validated packs, explicit start/setup contracts, and reproducible bundle metadata.",
+  "owner_repo": "greentic-bundle",
+  "teaches_concepts": [
+    "bundle",
+    "start",
+    "setup",
+    "agent_training_course"
+  ],
+  "tasks": [
+    "assemble bundle",
+    "create bundle",
+    "wire packs into bundle"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "bundle_inputs",
+      "title": "Collect Validated Inputs",
+      "objective": "Use validated app and extension packs as bundle inputs.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "List the application pack, extension packs, setup schema, and start command required by the bundle.",
+          "command": "greentic-bundle manifest --emit-answers bundle.answers.json",
+          "expected_output": "bundle.answers.json describes the intended pack graph."
+        },
+        {
+          "order": 2,
+          "instruction": "Verify every referenced pack has passed its own doctor/build checks.",
+          "command": "greentic-pack doctor",
+          "expected_output": "Referenced pack metadata is valid.",
+          "validation": "greentic-pack doctor"
+        }
+      ]
+    },
+    {
+      "id": "assemble",
+      "title": "Build the Bundle Artifact",
+      "objective": "Produce a bundle artifact with validated runtime metadata.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Assemble the bundle from reviewed answers.",
+          "command": "greentic-bundle build --answers bundle.answers.json",
+          "expected_output": "A bundle artifact and manifest are generated."
+        },
+        {
+          "order": 2,
+          "instruction": "Run bundle validation before publishing or demo usage.",
+          "command": "greentic-bundle validate --bundle dist/bundle.gtbundle",
+          "expected_output": "Bundle validation succeeds.",
+          "validation": "greentic-bundle validate --bundle dist/bundle.gtbundle"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-bundle manifest --emit-answers bundle.answers.json",
+    "greentic-bundle build --answers bundle.answers.json",
+    "greentic-bundle validate --bundle dist/bundle.gtbundle",
+    "greentic-pack doctor"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "zip bundle files manually",
+      "reason": "Manual bundles do not guarantee manifest, setup, and start contract validation.",
+      "replacement": "greentic-bundle build --answers bundle.answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-pack doctor",
+    "greentic-bundle validate --bundle dist/bundle.gtbundle",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-bundle/assemble-bundle.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/assemble-bundle.course.v1.json",
+    "examples/training/greentic-bundle/assemble-bundle.course.v1.json"
+  ]
+}

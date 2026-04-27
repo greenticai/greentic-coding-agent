@@ -1,0 +1,103 @@
+{
+  "version": "v1",
+  "id": "create_component",
+  "title": "Create a Greentic Component",
+  "summary": "Create a Greentic component through the current schema and answers wizard flow, then validate the wasm component artifact.",
+  "owner_repo": "greentic-component",
+  "teaches_concepts": [
+    "component",
+    "wizard",
+    "agent_training_course"
+  ],
+  "tasks": [
+    "create component",
+    "create greentic component",
+    "build wasm component"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "schema_contract",
+      "title": "Start From the Current Schema",
+      "objective": "Use the live wizard schema as the source of truth before writing component files.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Capture the current component wizard schema and inspect required answers.",
+          "command": "greentic-flow component-schema > component.schema.json",
+          "expected_output": "component.schema.json describes the current component answers contract.",
+          "validation": "test -s component.schema.json"
+        },
+        {
+          "order": 2,
+          "instruction": "Create an answers file that names the component, package, bindings, and exported functions.",
+          "command": "greentic-flow wizard --emit-answers answers.json",
+          "expected_output": "answers.json exists and is ready for review.",
+          "validation": "test -s answers.json"
+        }
+      ]
+    },
+    {
+      "id": "generate_and_validate",
+      "title": "Generate and Validate the Component",
+      "objective": "Apply the reviewed answers file and run component-specific QA before wiring it into a pack.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Apply the answers through the wizard flow.",
+          "command": "greentic-flow wizard --answers answers.json",
+          "expected_output": "Component source, manifest, and WIT bindings are generated."
+        },
+        {
+          "order": 2,
+          "instruction": "Run component QA using the same answers file.",
+          "command": "greentic-flow component-qa --answers answers.json",
+          "expected_output": "QA reports no schema, binding, or contract failures.",
+          "validation": "greentic-flow component-qa --answers answers.json"
+        },
+        {
+          "order": 3,
+          "instruction": "Build the wasm component artifact.",
+          "command": "cargo component build --target wasm32-wasip2",
+          "expected_output": "A wasm32-wasip2 component artifact is produced.",
+          "validation": "cargo component build --target wasm32-wasip2"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-flow component-schema",
+    "greentic-flow wizard --emit-answers answers.json",
+    "greentic-flow wizard --answers answers.json",
+    "greentic-flow component-qa --answers answers.json",
+    "cargo component build --target wasm32-wasip2"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "gtc component new",
+      "reason": "The current component contract is schema and answers driven.",
+      "replacement": "greentic-flow component-schema && greentic-flow wizard --answers answers.json"
+    },
+    {
+      "command": "greentic-component create",
+      "reason": "One-shot component creation hides the answers contract that must be reviewed.",
+      "replacement": "greentic-flow wizard --answers answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-flow component-qa --answers answers.json",
+    "cargo component build --target wasm32-wasip2",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-component/create-component.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/create-component.course.v1.json",
+    "examples/training/greentic-component/create-component.course.v1.json"
+  ]
+}

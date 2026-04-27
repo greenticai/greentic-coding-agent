@@ -1,0 +1,95 @@
+{
+  "version": "v1",
+  "id": "create_extension_pack",
+  "title": "Create an Extension Pack",
+  "summary": "Create an extension pack in greentic-pack using the current pack doctor, control hook, and package validation flow.",
+  "owner_repo": "greentic-pack",
+  "teaches_concepts": [
+    "extension_pack",
+    "hook",
+    "provider",
+    "agent_training_course"
+  ],
+  "tasks": [
+    "create extension pack",
+    "add provider extension pack",
+    "wire control hooks"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "pack_shape",
+      "title": "Create the Pack Shape",
+      "objective": "Start with the extension-pack manifest and keep shared contracts imported from greentic-types.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Create or update the pack manifest with extension-pack metadata and owner repo details.",
+          "command": "greentic-pack wizard --kind extension --answers answers.json",
+          "expected_output": "The extension pack manifest and source layout are generated."
+        },
+        {
+          "order": 2,
+          "instruction": "Import provider, hook, observer, or static-route contracts from greentic-types rather than copying local DTOs.",
+          "command": "cargo check --workspace",
+          "expected_output": "The pack compiles against shared contract crates.",
+          "validation": "cargo check --workspace"
+        }
+      ]
+    },
+    {
+      "id": "control_hooks",
+      "title": "Add Control Hooks",
+      "objective": "Use current control hook extension points for runtime behavior instead of legacy lifecycle scripts.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Register control hooks in the pack manifest and point them at typed component exports.",
+          "command": "greentic-pack add-control-hook --answers answers.json",
+          "expected_output": "The manifest includes typed control hook entries."
+        },
+        {
+          "order": 2,
+          "instruction": "Run pack doctor before publishing or wiring the pack into a bundle.",
+          "command": "greentic-pack doctor",
+          "expected_output": "Doctor reports no manifest, hook, or component binding failures.",
+          "validation": "greentic-pack doctor"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-pack wizard --kind extension --answers answers.json",
+    "greentic-pack add-control-hook --answers answers.json",
+    "greentic-pack doctor",
+    "cargo check --workspace"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "copy provider DTOs into pack",
+      "reason": "Provider, hook, observer, and static-route contracts are owned by greentic-types.",
+      "replacement": "import shared contracts from greentic-types"
+    },
+    {
+      "command": "manual lifecycle script hook",
+      "reason": "Extension packs should declare typed control hooks in the manifest.",
+      "replacement": "greentic-pack add-control-hook --answers answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-pack doctor",
+    "cargo check --workspace",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-pack/create-extension-pack.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/create-extension-pack.course.v1.json",
+    "examples/training/greentic-pack/create-extension-pack.course.v1.json"
+  ]
+}

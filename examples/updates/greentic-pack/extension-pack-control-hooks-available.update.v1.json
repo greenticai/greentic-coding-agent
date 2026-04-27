@@ -1,0 +1,81 @@
+{
+  "version": "v1",
+  "id": "extension_pack_control_hooks_available",
+  "title": "Extension Pack Control Hooks Are Available",
+  "summary": "Extension packs should use typed control hook declarations instead of legacy lifecycle scripts or ad hoc runtime callbacks.",
+  "owner_repo": "greentic-pack",
+  "update_type": "new_capability",
+  "published_at": "2026-04-26",
+  "effective_from": "2026-04-26",
+  "expires_at": null,
+  "affected_concepts": [
+    "extension_pack",
+    "hook",
+    "provider"
+  ],
+  "affected_workflows": [
+    "extension_pack_creation",
+    "pack_validation"
+  ],
+  "affected_courses": [
+    "create_extension_pack"
+  ],
+  "affected_repos": [
+    "greenticai/greentic-pack",
+    "greenticai/greentic-types",
+    "greenticai/greentic-bundle"
+  ],
+  "agent_instruction": "When creating or updating an extension pack, declare control hooks in the pack manifest and validate them with greentic-pack doctor. Do not add untyped lifecycle scripts for control behavior.",
+  "human_summary": "Extension packs now have typed control hook declarations for runtime behavior.",
+  "new_capabilities": [
+    {
+      "id": "extension_pack_control_hooks",
+      "title": "Extension Pack Control Hooks",
+      "summary": "Typed control hooks can be registered in extension pack manifests and validated before bundle assembly.",
+      "use_when": [
+        "create extension pack",
+        "add hook",
+        "wire provider lifecycle"
+      ],
+      "owner_repo": "greentic-pack",
+      "related_course": "create_extension_pack"
+    }
+  ],
+  "deprecated_commands": [
+    {
+      "command": "manual lifecycle script hook",
+      "reason": "Control behavior should be declared as typed hooks in the pack manifest.",
+      "replacement": "greentic-pack add-control-hook --answers answers.json"
+    }
+  ],
+  "replaced_guidance": [
+    {
+      "old_guidance": "Add lifecycle scripts directly to extension packs for control behavior.",
+      "replacement_guidance": "Declare typed control hooks in the extension pack manifest and validate them with greentic-pack doctor.",
+      "reason": "Typed hooks are discoverable by bundle assembly and safer for agents to modify."
+    }
+  ],
+  "migration_steps": [
+    {
+      "order": 1,
+      "instruction": "Add typed control hook declarations to the extension pack manifest.",
+      "command": "greentic-pack add-control-hook --answers answers.json",
+      "validation": "greentic-pack doctor"
+    },
+    {
+      "order": 2,
+      "instruction": "Run bundle validation if the extension pack is already consumed by a bundle.",
+      "command": "greentic-bundle validate --bundle dist/bundle.gtbundle",
+      "validation": "greentic-bundle validate --bundle dist/bundle.gtbundle"
+    }
+  ],
+  "required_validations": [
+    "greentic-pack doctor",
+    "greentic-bundle validate --bundle dist/bundle.gtbundle",
+    "bash ci/local_check.sh"
+  ],
+  "source_paths": [
+    "examples/updates/greentic-pack/extension-pack-control-hooks-available.update.v1.json"
+  ],
+  "severity": "important"
+}

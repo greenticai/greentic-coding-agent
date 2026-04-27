@@ -1,7 +1,7 @@
 pub mod oras;
 
 use gca_agent_files::render_generated_files;
-use gca_core::{Catalog, CatalogRepo, RepoIndex, SCHEMA_VERSION_V1};
+use gca_core::{AuthKind, Catalog, CatalogRepo, IndexVisibility, RepoIndex, SCHEMA_VERSION_V1};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -27,7 +27,7 @@ pub struct PackageMetadata {
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageOutput {
     pub package_dir: PathBuf,
     pub reference: String,
@@ -53,6 +53,64 @@ pub struct RefreshCheck {
     pub indexed_generator_version: Option<String>,
     pub current_schema_version: String,
     pub indexed_schema_version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncState {
+    pub version: String,
+    pub updated_at: String,
+    pub repos: Vec<SyncedRepoState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncedRepoState {
+    pub repo_id: String,
+    pub tenant: Option<String>,
+    pub visibility: IndexVisibility,
+    pub package_ref: String,
+    pub digest: Option<String>,
+    pub source_commit: Option<String>,
+    pub downloaded_at: String,
+    pub local_index_path: PathBuf,
+    pub local_tantivy_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncReport {
+    pub public_catalog: Option<String>,
+    pub tenant_catalog: Option<String>,
+    pub downloaded: Vec<PathBuf>,
+    pub skipped: Vec<String>,
+    pub failed: Vec<SyncFailure>,
+    pub merged_index_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncFailure {
+    pub repo_id: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedRepoIndex {
+    pub repo_index: RepoIndex,
+    pub state: SyncedRepoState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedIndexReport {
+    pub merged_index_path: PathBuf,
+    pub repos_indexed: usize,
+    pub documents_indexed: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncCatalogOptions {
+    pub tenant: Option<String>,
+    pub public_only: bool,
+    pub private_only: bool,
+    pub include_private: bool,
+    pub prune_disabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +300,38 @@ pub fn merge_catalogs(public_catalog: Catalog, tenant_catalog: Option<Catalog>) 
 
 pub fn default_tenant_catalog_ref(tenant: &str) -> String {
     format!("ghcr.io/greenticai/indexes/tenants/{tenant}/catalog:latest")
+}
+
+pub fn default_remote_store_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("remote-oci")
+}
+
+pub fn default_sync_cache_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("cache-oci")
+}
+
+pub fn default_indexes_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("indexes")
+}
+
+pub fn sync_state_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("sync-state.json")
+}
+
+pub fn merged_tantivy_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("tantivy").join("merged")
+}
+
+pub fn merged_tantivy_next_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent")
+        .join("tantivy")
+        .join("merged.next")
+}
+
+pub fn merged_tantivy_previous_path(home: &Path) -> PathBuf {
+    home.join(".greentic-agent")
+        .join("tantivy")
+        .join("merged.previous")
 }
 
 pub fn package_index(
@@ -435,6 +525,269 @@ pub fn sync_catalog(remote_root: &Path, cache_root: &Path) -> std::io::Result<Ve
     Ok(synced)
 }
 
+pub fn sync_catalog_with_state(
+    remote_root: &Path,
+    cache_root: &Path,
+    indexes_root: &Path,
+    home: &Path,
+    options: &SyncCatalogOptions,
+) -> Result<SyncReport, String> {
+    let catalog = match load_published_catalog(remote_root).map_err(|error| error.to_string())? {
+        Some(catalog) => catalog,
+        None => build_catalog(remote_root).map_err(|error| error.to_string())?,
+    };
+    let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
+    let mut report = SyncReport {
+        public_catalog: Some(DEFAULT_PUBLIC_CATALOG_REF.to_string()),
+        tenant_catalog: options.tenant.as_deref().map(default_tenant_catalog_ref),
+        downloaded: Vec::new(),
+        skipped: Vec::new(),
+        failed: Vec::new(),
+        merged_index_path: merged_tantivy_path(home),
+    };
+
+    for repo in &catalog.repos {
+        if !repo.enabled {
+            if options.prune_disabled {
+                prune_synced_repo(&mut state, repo);
+            }
+            report.skipped.push(repo.repo_id.clone());
+            continue;
+        }
+        if !sync_options_include_repo(options, repo) {
+            continue;
+        }
+
+        let source = repo_id_path(remote_root, &repo.repo_id).join(&repo.latest_tag);
+        let target = repo_id_path(cache_root, &repo.repo_id).join(&repo.latest_tag);
+        let digest = repo
+            .digest
+            .clone()
+            .or_else(|| file_digest_hex(&source.join("artifacts").join("repo-index.json")).ok());
+        let unchanged = state.repos.iter().any(|entry| {
+            entry.repo_id == repo.repo_id
+                && entry.tenant == repo.tenant
+                && entry.digest == digest
+                && entry.source_commit == repo.source_commit
+                && entry.local_index_path.join("repo-index.json").exists()
+        });
+        if unchanged {
+            report.skipped.push(repo.repo_id.clone());
+            continue;
+        }
+
+        if let Err(error) = copy_dir_all(&source, &target) {
+            report.failed.push(SyncFailure {
+                repo_id: repo.repo_id.clone(),
+                error: error.to_string(),
+            });
+            continue;
+        }
+        match sync_cached_index_from_package(repo, &source, indexes_root, digest) {
+            Ok(entry) => {
+                upsert_synced_repo(&mut state, entry);
+                report.downloaded.push(target);
+            }
+            Err(error) => report.failed.push(SyncFailure {
+                repo_id: repo.repo_id.clone(),
+                error,
+            }),
+        }
+    }
+
+    write_sync_state(home, &state)?;
+    Ok(report)
+}
+
+pub fn sync_repo_with_state(
+    remote_root: &Path,
+    cache_root: &Path,
+    indexes_root: &Path,
+    home: &Path,
+    repo_id: &str,
+    tag: &str,
+    tenant: Option<&str>,
+) -> Result<SyncReport, String> {
+    let source = repo_id_path(remote_root, repo_id).join(tag);
+    let target = repo_id_path(cache_root, repo_id).join(tag);
+    let repo = catalog_repo_from_package(&source, repo_id, tag, tenant)?;
+    let digest = repo.digest.clone();
+    let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
+    let mut report = SyncReport {
+        public_catalog: None,
+        tenant_catalog: tenant.map(default_tenant_catalog_ref),
+        downloaded: Vec::new(),
+        skipped: Vec::new(),
+        failed: Vec::new(),
+        merged_index_path: merged_tantivy_path(home),
+    };
+
+    let unchanged = state.repos.iter().any(|entry| {
+        entry.repo_id == repo.repo_id
+            && entry.tenant == repo.tenant
+            && entry.digest == digest
+            && entry.source_commit == repo.source_commit
+            && entry.local_index_path.join("repo-index.json").exists()
+    });
+    if unchanged {
+        report.skipped.push(repo.repo_id);
+        return Ok(report);
+    }
+
+    copy_dir_all(&source, &target).map_err(|error| error.to_string())?;
+    let entry = sync_cached_index_from_package(&repo, &source, indexes_root, digest)?;
+    upsert_synced_repo(&mut state, entry);
+    write_sync_state(home, &state)?;
+    report.downloaded.push(target);
+    Ok(report)
+}
+
+pub fn local_index_path_for(indexes_root: &Path, repo: &CatalogRepo) -> PathBuf {
+    match repo.visibility {
+        IndexVisibility::Tenant | IndexVisibility::Private => indexes_root
+            .join("tenants")
+            .join(repo.tenant.as_deref().unwrap_or("default"))
+            .join(repo_id_path(Path::new(""), &repo.repo_id)),
+        IndexVisibility::Public => indexes_root
+            .join("public")
+            .join(repo_id_path(Path::new(""), &repo.repo_id)),
+    }
+}
+
+pub fn empty_sync_state() -> SyncState {
+    SyncState {
+        version: SCHEMA_VERSION_V1.to_string(),
+        updated_at: timestamp_string(),
+        repos: Vec::new(),
+    }
+}
+
+pub fn load_sync_state(home: &Path) -> Option<SyncState> {
+    let raw = fs::read_to_string(sync_state_path(home)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+pub fn write_sync_state(home: &Path, state: &SyncState) -> Result<(), String> {
+    let path = sync_state_path(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let mut state = state.clone();
+    state.updated_at = timestamp_string();
+    state.repos.sort_by(|left, right| {
+        left.repo_id
+            .cmp(&right.repo_id)
+            .then(left.tenant.cmp(&right.tenant))
+    });
+    let raw = serde_json::to_string_pretty(&state).expect("sync state should serialize as json");
+    fs::write(&path, format!("{raw}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+pub fn load_cached_repo_indexes(
+    home: &Path,
+    tenant: Option<&str>,
+) -> Result<Vec<CachedRepoIndex>, String> {
+    let state = load_sync_state(home).unwrap_or_else(|| recover_sync_state_from_cache(home));
+    let mut cached = Vec::new();
+    for entry in state.repos {
+        if let Some(tenant) = tenant
+            && entry.tenant.as_deref() != Some(tenant)
+            && entry.visibility != IndexVisibility::Public
+        {
+            continue;
+        }
+        let path = entry.local_index_path.join("repo-index.json");
+        if !path.exists() {
+            continue;
+        }
+        let repo_index = load_repo_index(&path).map_err(|error| error.to_string())?;
+        cached.push(CachedRepoIndex {
+            repo_index,
+            state: entry,
+        });
+    }
+    cached.sort_by(|left, right| left.state.repo_id.cmp(&right.state.repo_id));
+    Ok(cached)
+}
+
+pub fn recover_sync_state_from_cache(home: &Path) -> SyncState {
+    let mut state = empty_sync_state();
+    let indexes_root = default_indexes_path(home);
+    recover_cached_indexes_under(
+        &indexes_root.join("public"),
+        None,
+        IndexVisibility::Public,
+        &mut state,
+    );
+    let tenants_root = indexes_root.join("tenants");
+    if let Ok(tenants) = fs::read_dir(&tenants_root) {
+        for tenant_entry in tenants.flatten() {
+            let tenant_path = tenant_entry.path();
+            if !tenant_path.is_dir() {
+                continue;
+            }
+            let tenant = tenant_entry.file_name().to_string_lossy().to_string();
+            recover_cached_indexes_under(
+                &tenant_path,
+                Some(tenant),
+                IndexVisibility::Tenant,
+                &mut state,
+            );
+        }
+    }
+    state
+}
+
+pub fn rebuild_merged_tantivy_index(
+    home: &Path,
+    tenant: Option<&str>,
+) -> Result<MergedIndexReport, String> {
+    let cached = load_cached_repo_indexes(home, tenant)?;
+    let repo_indexes = cached
+        .iter()
+        .map(|entry| entry.repo_index.clone())
+        .collect::<Vec<_>>();
+    let merged_path = merged_tantivy_path(home);
+    let next_path = merged_tantivy_next_path(home);
+    let previous_path = merged_tantivy_previous_path(home);
+    let build = gca_index::build_merged_tantivy_index(&repo_indexes, &next_path)
+        .map_err(|error| error.to_string())?;
+    fs::write(
+        next_path.join("greentic-meta.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version": SCHEMA_VERSION_V1,
+            "generated_at": timestamp_string(),
+            "repos": cached.iter().map(|entry| &entry.state.repo_id).collect::<Vec<_>>(),
+            "documents_indexed": build.documents_indexed,
+        }))
+        .expect("merged metadata should serialize"),
+    )
+    .map_err(|error| format!("failed to write merged metadata: {error}"))?;
+
+    if previous_path.exists() {
+        fs::remove_dir_all(&previous_path)
+            .map_err(|error| format!("failed to remove previous merged index: {error}"))?;
+    }
+    if merged_path.exists() {
+        fs::rename(&merged_path, &previous_path)
+            .map_err(|error| format!("failed to archive previous merged index: {error}"))?;
+    }
+    if let Err(error) = fs::rename(&next_path, &merged_path) {
+        if previous_path.exists() && !merged_path.exists() {
+            let _ = fs::rename(&previous_path, &merged_path);
+        }
+        return Err(format!("failed to activate merged index: {error}"));
+    }
+
+    Ok(MergedIndexReport {
+        merged_index_path: merged_path,
+        repos_indexed: cached.len(),
+        documents_indexed: build.documents_indexed,
+    })
+}
+
 fn load_published_catalog(remote_root: &Path) -> std::io::Result<Option<Catalog>> {
     let catalog_path = remote_root
         .join("catalogs")
@@ -450,6 +803,163 @@ fn load_published_catalog(remote_root: &Path) -> std::io::Result<Option<Catalog>
         .repos
         .sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
     Ok(Some(catalog))
+}
+
+fn sync_options_include_repo(options: &SyncCatalogOptions, repo: &CatalogRepo) -> bool {
+    if options.public_only && repo.visibility != IndexVisibility::Public {
+        return false;
+    }
+    if options.private_only && repo.visibility == IndexVisibility::Public {
+        return false;
+    }
+    if !options.include_private
+        && options.tenant.is_none()
+        && matches!(
+            repo.visibility,
+            IndexVisibility::Tenant | IndexVisibility::Private
+        )
+    {
+        return false;
+    }
+    if let Some(tenant) = &options.tenant
+        && let Some(repo_tenant) = &repo.tenant
+    {
+        return repo_tenant == tenant;
+    }
+    true
+}
+
+fn catalog_repo_from_package(
+    package_dir: &Path,
+    requested_repo: &str,
+    tag: &str,
+    tenant: Option<&str>,
+) -> Result<CatalogRepo, String> {
+    let repo_index = load_repo_index(&package_dir.join("artifacts").join("repo-index.json"))
+        .map_err(|error| error.to_string())?;
+    Ok(CatalogRepo {
+        repo_id: repo_index.repo_id.clone(),
+        repo_name: repo_index.repo_name.clone(),
+        repo_role: repo_index.repo_role,
+        latest_tag: tag.to_string(),
+        package_ref: format!("ghcr.io/greenticai/indexes/{requested_repo}:{tag}"),
+        updated_at: repo_index.generated_at.clone(),
+        visibility: if tenant.is_some() {
+            IndexVisibility::Tenant
+        } else {
+            IndexVisibility::Public
+        },
+        tenant: tenant.map(ToString::to_string),
+        required_auth: tenant.map(|_| AuthKind::GhcrToken),
+        digest: file_digest_hex(&package_dir.join("artifacts").join("repo-index.json")).ok(),
+        source_commit: None,
+        enabled: true,
+    })
+}
+
+fn sync_cached_index_from_package(
+    repo: &CatalogRepo,
+    package_dir: &Path,
+    indexes_root: &Path,
+    digest: Option<String>,
+) -> Result<SyncedRepoState, String> {
+    let target = local_index_path_for(indexes_root, repo);
+    fs::create_dir_all(&target)
+        .map_err(|error| format!("failed to create {}: {error}", target.display()))?;
+    let artifacts = package_dir.join("artifacts");
+    fs::copy(
+        artifacts.join("repo-index.json"),
+        target.join("repo-index.json"),
+    )
+    .map_err(|error| format!("failed to cache repo-index.json: {error}"))?;
+    let manifest_source = artifacts.join("repo-manifest.json");
+    if manifest_source.exists() {
+        fs::copy(manifest_source, target.join("manifest.json"))
+            .map_err(|error| format!("failed to cache manifest.json: {error}"))?;
+    }
+    let metadata_source = artifacts.join("package-metadata.json");
+    if metadata_source.exists() {
+        fs::copy(metadata_source, target.join("package-metadata.json"))
+            .map_err(|error| format!("failed to cache package metadata: {error}"))?;
+    }
+
+    let repo_index =
+        load_repo_index(&target.join("repo-index.json")).map_err(|error| error.to_string())?;
+    let tantivy_path = target.join("tantivy");
+    gca_index::build_local_tantivy_index(&repo_index, &tantivy_path)
+        .map_err(|error| error.to_string())?;
+    Ok(SyncedRepoState {
+        repo_id: repo.repo_id.clone(),
+        tenant: repo.tenant.clone(),
+        visibility: repo.visibility,
+        package_ref: repo.package_ref.clone(),
+        digest,
+        source_commit: repo.source_commit.clone(),
+        downloaded_at: timestamp_string(),
+        local_index_path: target,
+        local_tantivy_path: Some(tantivy_path),
+    })
+}
+
+fn upsert_synced_repo(state: &mut SyncState, entry: SyncedRepoState) {
+    state
+        .repos
+        .retain(|repo| repo.repo_id != entry.repo_id || repo.tenant != entry.tenant);
+    state.repos.push(entry);
+}
+
+fn prune_synced_repo(state: &mut SyncState, repo: &CatalogRepo) {
+    let mut retained = Vec::new();
+    for entry in state.repos.drain(..) {
+        if entry.repo_id == repo.repo_id && entry.tenant == repo.tenant {
+            let _ = fs::remove_dir_all(&entry.local_index_path);
+        } else {
+            retained.push(entry);
+        }
+    }
+    state.repos = retained;
+}
+
+fn recover_cached_indexes_under(
+    root: &Path,
+    tenant: Option<String>,
+    visibility: IndexVisibility,
+    state: &mut SyncState,
+) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for org_entry in entries.flatten() {
+        let org_path = org_entry.path();
+        if !org_path.is_dir() {
+            continue;
+        }
+        let Ok(repo_entries) = fs::read_dir(&org_path) else {
+            continue;
+        };
+        for repo_entry in repo_entries.flatten() {
+            let repo_path = repo_entry.path();
+            let repo_index_path = repo_path.join("repo-index.json");
+            if !repo_index_path.exists() {
+                continue;
+            }
+            let Ok(repo_index) = load_repo_index(&repo_index_path) else {
+                continue;
+            };
+            let digest = file_digest_hex(&repo_index_path).ok();
+            state.repos.push(SyncedRepoState {
+                repo_id: repo_index.repo_id.clone(),
+                tenant: tenant.clone(),
+                visibility,
+                package_ref: format!("ghcr.io/greenticai/indexes/{}:latest", repo_index.repo_id),
+                digest,
+                source_commit: None,
+                downloaded_at: timestamp_string(),
+                local_index_path: repo_path.clone(),
+                local_tantivy_path: Some(repo_path.join("tantivy")),
+            });
+        }
+    }
 }
 
 pub fn check_refresh(repo_root: &Path) -> std::io::Result<RefreshCheck> {
@@ -670,6 +1180,10 @@ fn digest_hex(bytes: &[u8]) -> String {
     out
 }
 
+fn file_digest_hex(path: &Path) -> std::io::Result<String> {
+    fs::read(path).map(|bytes| digest_hex(&bytes))
+}
+
 fn media_type_for(path: &str) -> &'static str {
     if path.ends_with(".json") {
         "application/json"
@@ -766,14 +1280,16 @@ fn timestamp_string() -> String {
 mod tests {
     use super::{
         DEFAULT_PUBLIC_CATALOG_REF, RemoteBackendKind, RemoteConfigInput, build_catalog,
-        check_refresh, default_tenant_catalog_ref, install_github_workflow, list_remote_repos,
-        merge_catalogs, package_index, publish_local_package, resolve_remote_config_from,
-        sync_catalog, sync_local_package,
+        check_refresh, default_indexes_path, default_tenant_catalog_ref, install_github_workflow,
+        list_remote_repos, load_cached_repo_indexes, load_sync_state, merge_catalogs,
+        package_index, publish_local_package, rebuild_merged_tantivy_index,
+        recover_sync_state_from_cache, resolve_remote_config_from, sync_catalog,
+        sync_catalog_with_state, sync_local_package, sync_state_path,
     };
     use gca_core::{
-        ConceptDescriptor, FreshnessStatus, InstructionDescriptor, KnowledgeScope, LifecyclePhase,
-        RepoAgentManifest, RepoIndex, RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor,
-        WorkflowDescriptor,
+        AuthKind, Catalog, ConceptDescriptor, FreshnessStatus, IndexVisibility,
+        InstructionDescriptor, KnowledgeScope, LifecyclePhase, RepoAgentManifest, RepoIndex,
+        RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor, WorkflowDescriptor,
     };
     use std::collections::BTreeMap;
     use std::fs;
@@ -981,6 +1497,164 @@ mod tests {
     }
 
     #[test]
+    fn sync_catalog_with_state_writes_normalized_cache_and_skips_unchanged() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let remote_root = temp.path().join("remote");
+        let cache_root = temp.path().join("cache");
+        let home = temp.path().join("home");
+        let indexes_root = default_indexes_path(&home);
+        let repo_index = write_packaged_repo(&repo_root, &remote_root, "latest");
+
+        let first = sync_catalog_with_state(
+            &remote_root,
+            &cache_root,
+            &indexes_root,
+            &home,
+            &Default::default(),
+        )
+        .unwrap();
+        let second = sync_catalog_with_state(
+            &remote_root,
+            &cache_root,
+            &indexes_root,
+            &home,
+            &Default::default(),
+        )
+        .unwrap();
+
+        let normalized_index = indexes_root
+            .join("public")
+            .join("greenticai")
+            .join("greentic-coding-agent")
+            .join("repo-index.json");
+        assert_eq!(first.downloaded.len(), 1);
+        assert!(first.failed.is_empty());
+        assert!(second.downloaded.is_empty());
+        assert_eq!(second.skipped, vec![repo_index.repo_id.clone()]);
+        assert!(sync_state_path(&home).exists());
+        assert!(normalized_index.exists());
+        assert!(normalized_index.with_file_name("manifest.json").exists());
+        assert!(
+            normalized_index
+                .with_file_name("package-metadata.json")
+                .exists()
+        );
+        assert!(normalized_index.with_file_name("tantivy").exists());
+
+        let state = load_sync_state(&home).unwrap();
+        assert_eq!(state.repos.len(), 1);
+        assert_eq!(state.repos[0].repo_id, repo_index.repo_id);
+        assert_eq!(state.repos[0].visibility, IndexVisibility::Public);
+        assert!(state.repos[0].digest.is_some());
+
+        let cached = load_cached_repo_indexes(&home, None).unwrap();
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].repo_index.repo_name, "greentic-coding-agent");
+        let merged = rebuild_merged_tantivy_index(&home, None).unwrap();
+        assert_eq!(merged.repos_indexed, 1);
+        assert!(merged.documents_indexed > 0);
+        assert!(merged.merged_index_path.join("greentic-meta.json").exists());
+
+        fs::remove_file(sync_state_path(&home)).unwrap();
+        let recovered = recover_sync_state_from_cache(&home);
+        assert_eq!(recovered.repos.len(), 1);
+        assert_eq!(
+            recovered.repos[0].repo_id,
+            "greenticai/greentic-coding-agent"
+        );
+    }
+
+    #[test]
+    fn sync_catalog_with_state_filters_and_caches_tenant_indexes() {
+        let temp = tempdir().unwrap();
+        let remote_root = temp.path().join("remote");
+        let cache_root = temp.path().join("cache");
+        let home = temp.path().join("home");
+        let indexes_root = default_indexes_path(&home);
+
+        let public_repo =
+            write_packaged_repo_named(&temp.path().join("public-repo"), &remote_root, "shared");
+        let tenant_repo =
+            write_packaged_repo_named(&temp.path().join("tenant-repo"), &remote_root, "tenant");
+        let mut catalog = build_catalog(&remote_root).unwrap();
+        let tenant_entry = catalog
+            .repos
+            .iter_mut()
+            .find(|repo| repo.repo_id == tenant_repo.repo_id)
+            .unwrap();
+        tenant_entry.visibility = IndexVisibility::Tenant;
+        tenant_entry.tenant = Some("meeza".to_string());
+        tenant_entry.required_auth = Some(AuthKind::GhcrToken);
+        write_public_catalog(&remote_root, &catalog);
+
+        let public_only = sync_catalog_with_state(
+            &remote_root,
+            &cache_root,
+            &indexes_root,
+            &home,
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(public_only.downloaded.len(), 1);
+        assert_eq!(public_only.skipped, Vec::<String>::new());
+        assert!(
+            indexes_root
+                .join("public")
+                .join("greenticai")
+                .join("shared")
+                .join("repo-index.json")
+                .exists()
+        );
+        assert!(
+            !indexes_root
+                .join("tenants")
+                .join("meeza")
+                .join("greenticai")
+                .join("tenant")
+                .join("repo-index.json")
+                .exists()
+        );
+
+        let tenant_sync = sync_catalog_with_state(
+            &remote_root,
+            &cache_root,
+            &indexes_root,
+            &home,
+            &super::SyncCatalogOptions {
+                tenant: Some("meeza".to_string()),
+                include_private: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(tenant_sync.downloaded.len(), 1);
+        assert_eq!(tenant_sync.skipped, vec![public_repo.repo_id]);
+        assert!(
+            indexes_root
+                .join("tenants")
+                .join("meeza")
+                .join("greenticai")
+                .join("tenant")
+                .join("repo-index.json")
+                .exists()
+        );
+
+        let cached = load_cached_repo_indexes(&home, Some("meeza")).unwrap();
+        assert_eq!(cached.len(), 2);
+        assert!(
+            cached
+                .iter()
+                .any(|entry| entry.state.visibility == IndexVisibility::Public)
+        );
+        assert!(
+            cached
+                .iter()
+                .any(|entry| entry.state.tenant.as_deref() == Some("meeza"))
+        );
+    }
+
+    #[test]
     fn check_refresh_reports_explicit_reasons() {
         let temp = tempdir().unwrap();
         let repo_root = temp.path().join("repo");
@@ -1144,6 +1818,56 @@ mod tests {
         demo_repo_index_named("greentic-coding-agent")
     }
 
+    fn write_packaged_repo(
+        repo_root: &std::path::Path,
+        remote_root: &std::path::Path,
+        tag: &str,
+    ) -> RepoIndex {
+        write_packaged_repo_named_with_tag(repo_root, remote_root, "greentic-coding-agent", tag)
+    }
+
+    fn write_packaged_repo_named(
+        repo_root: &std::path::Path,
+        remote_root: &std::path::Path,
+        repo_name: &str,
+    ) -> RepoIndex {
+        write_packaged_repo_named_with_tag(repo_root, remote_root, repo_name, "latest")
+    }
+
+    fn write_packaged_repo_named_with_tag(
+        repo_root: &std::path::Path,
+        remote_root: &std::path::Path,
+        repo_name: &str,
+        tag: &str,
+    ) -> RepoIndex {
+        fs::create_dir_all(repo_root.join(".greentic-agent")).unwrap();
+        fs::write(repo_root.join(".greentic-agent/manifest.json"), "{}").unwrap();
+        let repo_index = demo_repo_index_named(repo_name);
+        fs::write(
+            repo_root.join(".greentic-agent/repo-index.json"),
+            serde_json::to_string_pretty(&repo_index).unwrap(),
+        )
+        .unwrap();
+        let output = package_index(
+            repo_root,
+            &repo_index,
+            tag,
+            &repo_root.join(".greentic-agent/oci"),
+        )
+        .unwrap();
+        publish_local_package(&output.package_dir, remote_root, &repo_index.repo_id, tag).unwrap();
+        repo_index
+    }
+
+    fn write_public_catalog(remote_root: &std::path::Path, catalog: &Catalog) {
+        let catalog_path = remote_root
+            .join("catalogs")
+            .join("public")
+            .join("catalog.json");
+        fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
+        fs::write(catalog_path, serde_json::to_string_pretty(catalog).unwrap()).unwrap();
+    }
+
     fn build_catalog_fixture(generated_at: &str) -> gca_core::Catalog {
         gca_core::Catalog {
             version: "v1".to_string(),
@@ -1222,6 +1946,8 @@ mod tests {
                 forbidden_locations: vec!["customer-solution".to_string()],
                 required_validations: vec!["shared_schema_changed".to_string()],
             }],
+            training_courses: Vec::new(),
+            knowledge_updates: Vec::new(),
             instruction_graph: vec![InstructionDescriptor {
                 id: "readme".to_string(),
                 path: "README.md".to_string(),

@@ -1,0 +1,88 @@
+{
+  "version": "v1",
+  "id": "create_flow",
+  "title": "Create a Greentic Flow",
+  "summary": "Create a Greentic flow by defining typed steps, input/output mappings, and replayable validations.",
+  "owner_repo": "greentic-flow",
+  "teaches_concepts": [
+    "flow",
+    "wizard",
+    "component"
+  ],
+  "tasks": [
+    "create flow",
+    "add flow",
+    "build workflow"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "flow_contract",
+      "title": "Define the Flow Contract",
+      "objective": "Use the flow schema and answers file to define steps and data movement explicitly.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Capture the flow schema before writing step files.",
+          "command": "greentic-flow schema > flow.schema.json",
+          "expected_output": "flow.schema.json describes required flow answers.",
+          "validation": "test -s flow.schema.json"
+        },
+        {
+          "order": 2,
+          "instruction": "Create a reviewed flow answers file with step IDs, component bindings, and mapping rules.",
+          "command": "greentic-flow wizard --emit-answers flow.answers.json",
+          "expected_output": "flow.answers.json describes the flow contract."
+        }
+      ]
+    },
+    {
+      "id": "apply_and_replay",
+      "title": "Apply and Replay",
+      "objective": "Generate the flow and prove it can replay with fixture inputs.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Apply the flow answers through the wizard.",
+          "command": "greentic-flow wizard --answers flow.answers.json",
+          "expected_output": "Flow files and step mapping config are generated."
+        },
+        {
+          "order": 2,
+          "instruction": "Replay the flow with fixture input.",
+          "command": "greentic-flow replay --flow . --input fixtures/input.json",
+          "expected_output": "Replay completes and writes expected outputs.",
+          "validation": "greentic-flow replay --flow . --input fixtures/input.json"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-flow schema",
+    "greentic-flow wizard --emit-answers flow.answers.json",
+    "greentic-flow wizard --answers flow.answers.json",
+    "greentic-flow replay --flow . --input fixtures/input.json"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "hand-wire flow steps without mapping validation",
+      "reason": "Flow mappings must be explicit and replayable.",
+      "replacement": "greentic-flow wizard --answers flow.answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-flow replay --flow . --input fixtures/input.json",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-flow/create-flow.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/create-flow.course.v1.json",
+    "examples/training/greentic-flow/create-flow.course.v1.json"
+  ]
+}

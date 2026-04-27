@@ -1,0 +1,69 @@
+{
+  "version": "v1",
+  "id": "validate_bundle",
+  "title": "Validate a Greentic Bundle",
+  "summary": "Validate bundle manifests, pack references, setup/start contracts, and publish readiness.",
+  "owner_repo": "greentic-bundle",
+  "teaches_concepts": [
+    "bundle",
+    "start",
+    "setup"
+  ],
+  "tasks": [
+    "validate bundle",
+    "check bundle",
+    "verify bundle artifact"
+  ],
+  "audience": [
+    "coding_agent",
+    "ci_automation"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "static_validation",
+      "title": "Static Bundle Validation",
+      "objective": "Catch manifest and dependency issues before runtime checks.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Validate the bundle manifest and referenced pack graph.",
+          "command": "greentic-bundle validate --bundle dist/bundle.gtbundle",
+          "expected_output": "Manifest, pack references, and setup/start contracts are valid.",
+          "validation": "greentic-bundle validate --bundle dist/bundle.gtbundle"
+        },
+        {
+          "order": 2,
+          "instruction": "Run the package doctor against bundled pack metadata.",
+          "command": "greentic-pack doctor",
+          "expected_output": "Pack metadata remains valid in bundle context.",
+          "validation": "greentic-pack doctor"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-bundle validate --bundle dist/bundle.gtbundle",
+    "greentic-pack doctor",
+    "bash ci/local_check.sh"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "inspect bundle zip by hand",
+      "reason": "Manual inspection misses contract and dependency checks.",
+      "replacement": "greentic-bundle validate --bundle dist/bundle.gtbundle"
+    }
+  ],
+  "required_validations": [
+    "greentic-bundle validate --bundle dist/bundle.gtbundle",
+    "greentic-pack doctor",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-bundle/validate-bundle.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/validate-bundle.course.v1.json",
+    "examples/training/greentic-bundle/validate-bundle.course.v1.json"
+  ]
+}

@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 gca-agent-files = { path = "../gca-agent-files" }
 gca-core = { path = "../gca-core" }
+gca-index = { path = "../gca-index" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

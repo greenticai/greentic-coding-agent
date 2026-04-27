@@ -9,6 +9,8 @@ repo-index = {
   workflow_graph: [* workflow-descriptor],
   validations: [* validation-descriptor],
   reuse: [* reuse-descriptor],
+  ? training_courses: [* training-course-descriptor],
+  ? knowledge_updates: [* knowledge-update-descriptor],
   instruction_graph: [* instruction-descriptor],
   instruction_paths: [* text],
   source_stats: source-stats,
@@ -73,11 +75,98 @@ reuse-descriptor = {
   required_validations: [* text],
 }
 
+training-course-descriptor = {
+  version: text,
+  id: text,
+  title: text,
+  summary: text,
+  owner_repo: text,
+  teaches_concepts: [* text],
+  tasks: [* text],
+  audience: [* training-audience],
+  lifecycle_phase: lifecycle-phase,
+  modules: [* training-module-descriptor],
+  canonical_commands: [* text],
+  deprecated_commands: [* deprecated-command-descriptor],
+  required_validations: [* text],
+  examples: [* text],
+  source_paths: [* text],
+}
+
+training-module-descriptor = {
+  id: text,
+  title: text,
+  objective: text,
+  steps: [* training-step-descriptor],
+}
+
+training-step-descriptor = {
+  order: uint,
+  instruction: text,
+  ? command: text,
+  ? expected_output: text,
+  ? validation: text,
+}
+
+deprecated-command-descriptor = {
+  command: text,
+  reason: text,
+  ? replacement: text,
+}
+
+knowledge-update-descriptor = {
+  version: text,
+  id: text,
+  title: text,
+  summary: text,
+  owner_repo: text,
+  update_type: knowledge-update-type,
+  published_at: text,
+  ? effective_from: text,
+  ? expires_at: text,
+  affected_concepts: [* text],
+  affected_workflows: [* text],
+  affected_courses: [* text],
+  affected_repos: [* text],
+  agent_instruction: text,
+  ? human_summary: text,
+  new_capabilities: [* capability-announcement],
+  deprecated_commands: [* deprecated-command-descriptor],
+  replaced_guidance: [* replaced-guidance-descriptor],
+  migration_steps: [* migration-step-descriptor],
+  required_validations: [* text],
+  source_paths: [* text],
+  severity: knowledge-update-severity,
+}
+
+capability-announcement = {
+  id: text,
+  title: text,
+  summary: text,
+  use_when: [* text],
+  owner_repo: text,
+  ? related_course: text,
+}
+
+replaced-guidance-descriptor = {
+  old_guidance: text,
+  replacement_guidance: text,
+  reason: text,
+}
+
+migration-step-descriptor = {
+  order: uint,
+  instruction: text,
+  ? command: text,
+  ? validation: text,
+}
+
 source-stats = {
   workspace_members: [* text],
   crate_names: [* text],
   modules: [* text],
   public_items: [* text],
+  ? rust_symbols: [* rust-symbol-descriptor],
   test_targets: [* text],
   feature_names: [* text],
   dependencies: [* text],
@@ -85,6 +174,25 @@ source-stats = {
   workflow_files: [* text],
   example_paths: [* text],
 }
+
+rust-symbol-descriptor = {
+  name: text,
+  kind: rust-symbol-kind,
+  visibility: text,
+  path: text,
+  ? line: uint,
+}
+
+rust-symbol-kind = &(
+  function: "function",
+  struct: "struct",
+  enum: "enum",
+  trait: "trait",
+  impl: "impl",
+  module: "module",
+  use: "use",
+  test: "test",
+)
 
 repo-role = &(
   core_contracts: "core_contracts",
@@ -122,4 +230,33 @@ freshness-status = &(
   fresh: "fresh",
   stale: "stale",
   unknown: "unknown",
+)
+
+training-audience = &(
+  coding_agent: "coding_agent",
+  human_developer: "human_developer",
+  ci_automation: "ci_automation",
+  repo_maintainer: "repo_maintainer",
+)
+
+knowledge-update-type = &(
+  new_capability: "new_capability",
+  behaviour_change: "behaviour_change",
+  deprecated_workflow: "deprecated_workflow",
+  deprecated_command: "deprecated_command",
+  migration_required: "migration_required",
+  validation_changed: "validation_changed",
+  ownership_changed: "ownership_changed",
+  course_updated: "course_updated",
+  security_notice: "security_notice",
+  breaking_change: "breaking_change",
+  documentation_correction: "documentation_correction",
+)
+
+knowledge-update-severity = &(
+  info: "info",
+  recommended: "recommended",
+  important: "important",
+  breaking: "breaking",
+  critical: "critical",
 )

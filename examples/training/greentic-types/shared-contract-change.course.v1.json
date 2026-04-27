@@ -1,0 +1,92 @@
+{
+  "version": "v1",
+  "id": "shared_contract_change",
+  "title": "Change a Shared Greentic Contract",
+  "summary": "Change provider, hook, observer, static-route, or capability contracts in greentic-types with downstream validation guidance.",
+  "owner_repo": "greentic-types",
+  "teaches_concepts": [
+    "capability",
+    "provider",
+    "hook",
+    "observer",
+    "static_route"
+  ],
+  "tasks": [
+    "change shared contract",
+    "update provider contract",
+    "update hook type"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer",
+    "repo_maintainer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "contract_owner",
+      "title": "Make the Change in the Owner Repo",
+      "objective": "Keep shared contracts centralized in greentic-types and avoid downstream copies.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Identify the canonical contract type and its downstream consumers before editing.",
+          "command": "greentic-coding-agent impact --symbol <contract-id> --format json",
+          "expected_output": "Likely affected concepts, workflows, and validations are listed."
+        },
+        {
+          "order": 2,
+          "instruction": "Change the shared type and update serialization fixtures or schema examples.",
+          "command": "cargo test -p greentic-types",
+          "expected_output": "greentic-types tests pass.",
+          "validation": "cargo test -p greentic-types"
+        }
+      ]
+    },
+    {
+      "id": "consumer_checks",
+      "title": "Validate Consumers",
+      "objective": "Run downstream checks for packs, bundles, and launchers affected by the contract.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Run local CI and coverage after updating consumers or migration notes.",
+          "command": "bash ci/local_check.sh",
+          "expected_output": "Workspace CI passes.",
+          "validation": "bash ci/local_check.sh"
+        },
+        {
+          "order": 2,
+          "instruction": "Document migration guidance if the serialized contract changes.",
+          "command": "greentic-coding-agent updates --concept provider --format markdown",
+          "expected_output": "Relevant knowledge updates are visible to agents."
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-coding-agent impact --symbol <contract-id> --format json",
+    "cargo test -p greentic-types",
+    "bash ci/local_check.sh",
+    "greentic-dev coverage"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "copy shared DTO into consumer repo",
+      "reason": "Shared contracts are owned by greentic-types and should be imported by consumers.",
+      "replacement": "change the contract in greentic-types and update consumers"
+    }
+  ],
+  "required_validations": [
+    "cargo test -p greentic-types",
+    "bash ci/local_check.sh",
+    "greentic-dev coverage"
+  ],
+  "examples": [
+    "examples/training/greentic-types/shared-contract-change.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/shared-contract-change.course.v1.json",
+    "examples/training/greentic-types/shared-contract-change.course.v1.json"
+  ]
+}

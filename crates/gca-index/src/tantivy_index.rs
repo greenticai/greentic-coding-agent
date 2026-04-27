@@ -41,6 +41,20 @@ pub fn build_local_tantivy_index(
     repo_index: &RepoIndex,
     index_dir: &Path,
 ) -> Result<TantivyBuildReport, TantivyIndexError> {
+    build_tantivy_index(std::slice::from_ref(repo_index), index_dir)
+}
+
+pub fn build_merged_tantivy_index(
+    repo_indexes: &[RepoIndex],
+    index_dir: &Path,
+) -> Result<TantivyBuildReport, TantivyIndexError> {
+    build_tantivy_index(repo_indexes, index_dir)
+}
+
+fn build_tantivy_index(
+    repo_indexes: &[RepoIndex],
+    index_dir: &Path,
+) -> Result<TantivyBuildReport, TantivyIndexError> {
     if index_dir.exists() {
         std::fs::remove_dir_all(index_dir).map_err(|source| TantivyIndexError::RemoveDir {
             path: index_dir.display().to_string(),
@@ -64,24 +78,28 @@ pub fn build_local_tantivy_index(
 
     let index = Index::create_in_dir(index_dir, schema)?;
     let mut writer = index.writer(50_000_000)?;
-    let documents = collect_documents(repo_index);
-    for document in &documents {
-        writer.add_document(doc!(
-            repo_id => repo_index.repo_id.clone(),
-            path => document.path.clone(),
-            kind => document.kind.clone(),
-            title => document.title.clone(),
-            body => document.body.clone(),
-            concept_ids => document.concept_ids.clone(),
-            phase => document.phase.clone(),
-            provenance => document.provenance.clone(),
-        ))?;
+    let mut documents_indexed = 0;
+    for repo_index in repo_indexes {
+        let documents = collect_documents(repo_index);
+        for document in &documents {
+            writer.add_document(doc!(
+                repo_id => repo_index.repo_id.clone(),
+                path => document.path.clone(),
+                kind => document.kind.clone(),
+                title => document.title.clone(),
+                body => document.body.clone(),
+                concept_ids => document.concept_ids.clone(),
+                phase => document.phase.clone(),
+                provenance => document.provenance.clone(),
+            ))?;
+        }
+        documents_indexed += documents.len();
     }
     writer.commit()?;
 
     Ok(TantivyBuildReport {
         index_path: index_dir.to_path_buf(),
-        documents_indexed: documents.len(),
+        documents_indexed,
     })
 }
 
@@ -126,9 +144,14 @@ fn collect_documents(repo_index: &RepoIndex) -> Vec<IndexDocument> {
     }
 
     for instruction in &repo_index.instruction_graph {
+        let document_kind = match instruction.kind.as_str() {
+            "training_course" => "course",
+            "knowledge_update" => "update",
+            _ => "instruction",
+        };
         documents.push(IndexDocument {
             path: instruction.path.clone(),
-            kind: "instruction".to_string(),
+            kind: document_kind.to_string(),
             title: instruction.title.clone(),
             body: format!(
                 "{} {} {}",
@@ -163,6 +186,32 @@ fn collect_documents(repo_index: &RepoIndex) -> Vec<IndexDocument> {
         documents.push(reuse_document(reuse));
     }
 
+    for update in &repo_index.knowledge_updates {
+        documents.push(IndexDocument {
+            path: update.source_paths.first().cloned().unwrap_or_default(),
+            kind: "update".to_string(),
+            title: update.title.clone(),
+            body: format!(
+                "{} {} {} {} {} {} {}",
+                update.summary,
+                update.agent_instruction,
+                update.update_type.as_str(),
+                update.severity.as_str(),
+                update.affected_workflows.join(" "),
+                update.affected_courses.join(" "),
+                update
+                    .migration_steps
+                    .iter()
+                    .filter_map(|step| step.command.clone())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            concept_ids: update.affected_concepts.join(" "),
+            phase: String::new(),
+            provenance: format!("knowledge_updates:{}", update.id),
+        });
+    }
+
     for module in &repo_index.source_stats.modules {
         documents.push(simple_source_document(
             "module",
@@ -175,6 +224,16 @@ fn collect_documents(repo_index: &RepoIndex) -> Vec<IndexDocument> {
             "code_symbol",
             item,
             "source_stats.public_items",
+        ));
+    }
+    for symbol in &repo_index.source_stats.rust_symbols {
+        documents.push(simple_source_document(
+            "rust_symbol",
+            &format!(
+                "{} {:?} {} {}",
+                symbol.visibility, symbol.kind, symbol.name, symbol.path
+            ),
+            "source_stats.rust_symbols",
         ));
     }
     for dependency in &repo_index.source_stats.dependencies {

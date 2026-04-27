@@ -1,5 +1,9 @@
-use gca_core::{RepoIndex, ValidationDescriptor};
-use gca_query::{PolicyBundle, SearchMode, locate_owner, required_validations, search_repo_index};
+use gca_core::{RepoIndex, TrainingAudience, ValidationDescriptor};
+use gca_query::{
+    PolicyBundle, SearchMode, list_training_courses, locate_owner, recommend_training_courses,
+    recommend_updates_for_task, required_validations, search_repo_index, show_knowledge_update,
+    show_training_course,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -83,6 +87,32 @@ pub fn tool_definitions() -> Vec<McpTool> {
         ),
         tool("search_reuse", "Search seeded reuse and ownership policy."),
         tool("search_all", "Search all indexed local result types."),
+        tool(
+            "list_training_courses",
+            "List repo-authored training courses.",
+        ),
+        tool("show_training_course", "Show a training course by ID."),
+        tool(
+            "recommend_training_courses",
+            "Recommend training courses for a task.",
+        ),
+        tool(
+            "list_knowledge_updates",
+            "List repo-authored knowledge updates.",
+        ),
+        tool("show_knowledge_update", "Show a knowledge update by ID."),
+        tool(
+            "recommend_knowledge_updates",
+            "Recommend knowledge updates for a task.",
+        ),
+        tool(
+            "list_new_knowledge_updates",
+            "List knowledge updates not yet marked seen by the transport-managed state.",
+        ),
+        tool(
+            "mark_knowledge_update_seen",
+            "Mark a knowledge update seen in transport-managed state.",
+        ),
         tool("locate_owner", "Find the owner repo for a concept."),
         tool(
             "locate_extension_point",
@@ -166,7 +196,64 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
                 search_repo_index(context.repo_index, SearchMode::Instruction, query),
                 search_repo_index(context.repo_index, SearchMode::Concept, query),
                 search_repo_index(context.repo_index, SearchMode::Reuse, query),
+                search_repo_index(context.repo_index, SearchMode::Course, query),
+                search_repo_index(context.repo_index, SearchMode::Update, query),
             ])
+            .map_err(|error| error.to_string())
+        }
+        "list_training_courses" => serde_json::to_value(list_training_courses(context.repo_index))
+            .map_err(|error| error.to_string()),
+        "show_training_course" => {
+            let Some(course_id) = arguments.get("course_id").and_then(Value::as_str) else {
+                return error_response(id, "missing `course_id` argument");
+            };
+            serde_json::to_value(show_training_course(context.repo_index, course_id))
+                .map_err(|error| error.to_string())
+        }
+        "recommend_training_courses" => {
+            let Some(task) = arguments.get("task").and_then(Value::as_str) else {
+                return error_response(id, "missing `task` argument");
+            };
+            let audience = match arguments.get("audience").and_then(Value::as_str) {
+                Some(value) => match TrainingAudience::parse(value) {
+                    Ok(audience) => Some(audience),
+                    Err(error) => return error_response(id, &error),
+                },
+                None => None,
+            };
+            serde_json::to_value(recommend_training_courses(
+                context.repo_index,
+                task,
+                audience,
+            ))
+            .map_err(|error| error.to_string())
+        }
+        "list_knowledge_updates" => serde_json::to_value(&context.repo_index.knowledge_updates)
+            .map_err(|error| error.to_string()),
+        "show_knowledge_update" => {
+            let Some(update_id) = arguments.get("update_id").and_then(Value::as_str) else {
+                return error_response(id, "missing `update_id` argument");
+            };
+            serde_json::to_value(show_knowledge_update(context.repo_index, update_id))
+                .map_err(|error| error.to_string())
+        }
+        "recommend_knowledge_updates" => {
+            let Some(task) = arguments.get("task").and_then(Value::as_str) else {
+                return error_response(id, "missing `task` argument");
+            };
+            serde_json::to_value(recommend_updates_for_task(context.repo_index, task))
+                .map_err(|error| error.to_string())
+        }
+        "list_new_knowledge_updates" => serde_json::to_value(&context.repo_index.knowledge_updates)
+            .map_err(|error| error.to_string()),
+        "mark_knowledge_update_seen" => {
+            let Some(update_id) = arguments.get("update_id").and_then(Value::as_str) else {
+                return error_response(id, "missing `update_id` argument");
+            };
+            serde_json::to_value(serde_json::json!({
+                "update_id": update_id,
+                "message": "seen-state is managed by the host transport"
+            }))
             .map_err(|error| error.to_string())
         }
         "locate_owner" => {
@@ -466,7 +553,7 @@ mod tests {
             snapshot.freshness_warning.as_deref(),
             Some("index is stale")
         );
-        assert_eq!(tool_definitions().len(), 17);
+        assert_eq!(tool_definitions().len(), 25);
         assert!(snapshot.tools.iter().any(|tool| tool.name == "search_all"));
         assert!(
             snapshot
@@ -619,6 +706,8 @@ mod tests {
                 forbidden_locations: vec!["customer-solution".to_string()],
                 required_validations: vec!["setup_runtime_schema_change".to_string()],
             }],
+            training_courses: Vec::new(),
+            knowledge_updates: Vec::new(),
             instruction_graph: Vec::new(),
             instruction_paths: Vec::new(),
             source_stats: SourceStats {

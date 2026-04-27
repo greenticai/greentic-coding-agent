@@ -2,7 +2,15 @@
 
 ## Status
 
-Draft architecture intended for code execution planning.
+Draft architecture with implemented workspace slices. The current codebase has a
+workspace-internal CLI plus internal `publish = false` library crates.
+`gca-engine` is the shared service boundary for newer work, and `gca-cli` now
+depends on it for primary command groups. The previous publishable CLI layout
+was intentionally disabled because `cargo package`/`cargo publish --dry-run`
+for a crates.io package cannot validate dependencies on unpublished path-only
+workspace crates. Shared sync-state and normalized cache/index behavior now
+lives in `gca-oci`, so engine and CLI code use the same `remote-oci`,
+`cache-oci`, `indexes`, `sync-state.json`, and merged Tantivy layout.
 
 ## Purpose
 
@@ -23,6 +31,28 @@ greentic-coding-agent
 ```
 
 This follows the existing Greentic-dev launcher pattern, while keeping the coding-agent engine, schemas, OCI packaging, GHCR discovery, and MCP surface in a dedicated repository.
+
+Current local crate layout:
+
+```text
+crates/gca-cli          internal CLI binary package
+crates/gca-engine       shared service layer, internal for now
+crates/gca-core         canonical models and registry contracts
+crates/gca-index        repo analysis and local index writing
+crates/gca-query        search, command catalog, owner/validation policy
+crates/gca-agent-files  generated agent-file rendering/writing
+crates/gca-oci          OCI-style package, sync/cache state, refresh, workflow rendering
+crates/gca-mcp          MCP-style tool helpers and request dispatch
+crates/gca-greentic     Greentic-specific enrichment heuristics
+```
+
+The intended direction is for all CLI behavior, MCP/HTTP server mode, and
+future `gtc dev coding-agent` integration to call
+`gca-engine::CodingAgentService`. The current CLI is partly wired through that
+service while legacy transport-specific paths remain in place. Re-enabling
+crates.io publishing requires a package strategy for the internal crates:
+publish/version the shared crates in dependency order or add a separate
+publishable wrapper that does not depend on unpublished path dependencies.
 
 ---
 

@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::json;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -21,6 +22,8 @@ fn help_lists_scaffolded_commands() {
             .and(predicate::str::contains("check-refresh"))
             .and(predicate::str::contains("commands"))
             .and(predicate::str::contains("concepts"))
+            .and(predicate::str::contains("courses"))
+            .and(predicate::str::contains("course"))
             .and(predicate::str::contains("detect-changes"))
             .and(predicate::str::contains("describe"))
             .and(predicate::str::contains("generate-agent-files"))
@@ -28,6 +31,7 @@ fn help_lists_scaffolded_commands() {
             .and(predicate::str::contains("install-github-workflow"))
             .and(predicate::str::contains("list-remote-repos"))
             .and(predicate::str::contains("locate-owner"))
+            .and(predicate::str::contains("org"))
             .and(predicate::str::contains("package-index"))
             .and(predicate::str::contains("publish-index"))
             .and(predicate::str::contains("required-validations"))
@@ -35,6 +39,8 @@ fn help_lists_scaffolded_commands() {
             .and(predicate::str::contains("serve"))
             .and(predicate::str::contains("show-catalog"))
             .and(predicate::str::contains("sync"))
+            .and(predicate::str::contains("train"))
+            .and(predicate::str::contains("updates"))
             .and(predicate::str::contains("validate-plan"))
             .and(predicate::str::contains("workflows")),
     );
@@ -251,6 +257,155 @@ fn commands_command_lists_catalog_entries() {
 }
 
 #[test]
+fn courses_command_lists_authored_training_courses() {
+    let temp_root = unique_temp_dir("gca-cli-courses");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut command = Command::cargo_bin("greentic-coding-agent").unwrap();
+    command
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["courses", "--format", "json"]);
+
+    command.assert().success().stdout(
+        predicate::str::contains("\"id\": \"create_demo_component\"")
+            .and(predicate::str::contains("\"audience\"")),
+    );
+}
+
+#[test]
+fn course_recommend_and_train_use_task_matching() {
+    let temp_root = unique_temp_dir("gca-cli-course-recommend");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut recommend = Command::cargo_bin("greentic-coding-agent").unwrap();
+    recommend
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "course",
+            "recommend",
+            "--task",
+            "create a component",
+            "--format",
+            "json",
+        ]);
+
+    recommend
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"id\": \"create_demo_component\"",
+        ));
+
+    let mut train = Command::cargo_bin("greentic-coding-agent").unwrap();
+    train.current_dir(&repo_root).env("HOME", &fake_home).args([
+        "train",
+        "--task",
+        "create a component",
+        "--audience",
+        "coding_agent",
+        "--format",
+        "markdown",
+    ]);
+
+    train.assert().success().stdout(
+        predicate::str::contains("# Training Plan")
+            .and(predicate::str::contains(
+                "# Knowledge updates affecting this task",
+            ))
+            .and(predicate::str::contains("Severity: breaking"))
+            .and(predicate::str::contains(
+                "greentic-flow wizard --answers answers.json",
+            )),
+    );
+}
+
+#[test]
+fn updates_command_filters_and_shows_markdown() {
+    let temp_root = unique_temp_dir("gca-cli-updates");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut list = Command::cargo_bin("greentic-coding-agent").unwrap();
+    list.current_dir(&repo_root).env("HOME", &fake_home).args([
+        "updates",
+        "--task",
+        "create a component",
+        "--severity",
+        "breaking",
+        "--format",
+        "json",
+    ]);
+
+    list.assert().success().stdout(
+        predicate::str::contains("\"id\": \"component_answers_flow\"")
+            .and(predicate::str::contains("\"severity\": \"breaking\"")),
+    );
+
+    let mut show = Command::cargo_bin("greentic-coding-agent").unwrap();
+    show.current_dir(&repo_root).env("HOME", &fake_home).args([
+        "updates",
+        "show",
+        "component_answers_flow",
+        "--format",
+        "markdown",
+    ]);
+
+    show.assert().success().stdout(
+        predicate::str::contains("Agent instruction")
+            .and(predicate::str::contains("Deprecated commands"))
+            .and(predicate::str::contains("Migration steps")),
+    );
+
+    let mut new_before_seen = Command::cargo_bin("greentic-coding-agent").unwrap();
+    new_before_seen
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["updates", "--new", "--format", "json"]);
+    new_before_seen
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"id\": \"component_answers_flow\"",
+        ));
+
+    let mut mark_seen = Command::cargo_bin("greentic-coding-agent").unwrap();
+    mark_seen
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "updates",
+            "mark-seen",
+            "component_answers_flow",
+            "--format",
+            "json",
+        ]);
+    mark_seen.assert().success().stdout(
+        predicate::str::contains("greentic-component::component_answers_flow")
+            .and(predicate::str::contains("agent-knowledge-state.json")),
+    );
+
+    let mut new_after_seen = Command::cargo_bin("greentic-coding-agent").unwrap();
+    new_after_seen
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["updates", "--new", "--format", "json"]);
+    new_after_seen
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
+}
+
+#[test]
 fn search_instruction_mode_returns_structured_results() {
     let temp_root = unique_temp_dir("gca-cli-search-instruction");
     let repo_root = temp_root.join("demo-repo");
@@ -280,6 +435,50 @@ fn search_instruction_mode_returns_structured_results() {
             ))
             .and(predicate::str::contains("\"result_type\": \"instruction\""))
             .and(predicate::str::contains("\"locator\": \"README.md\"")),
+    );
+}
+
+#[test]
+fn search_course_and_update_modes_find_records() {
+    let temp_root = unique_temp_dir("gca-cli-search-course-update");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut course = Command::cargo_bin("greentic-coding-agent").unwrap();
+    course
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "search",
+            "--mode",
+            "course",
+            "component",
+            "--format",
+            "json",
+        ]);
+    course.assert().success().stdout(
+        predicate::str::contains("\"result_type\": \"course\"")
+            .and(predicate::str::contains("Create demo component"))
+            .and(predicate::str::contains(
+                ".greentic/training/create-demo-component.course.v1.json",
+            )),
+    );
+
+    let mut update = Command::cargo_bin("greentic-coding-agent").unwrap();
+    update
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["search", "--mode", "update", "answers", "--format", "json"]);
+    update.assert().success().stdout(
+        predicate::str::contains("\"result_type\": \"update\"")
+            .and(predicate::str::contains(
+                "Component creation uses wizard answers",
+            ))
+            .and(predicate::str::contains(
+                ".greentic/updates/component-answers-flow.update.v1.json",
+            )),
     );
 }
 
@@ -804,6 +1003,84 @@ fn catalog_membership_commands_manage_editable_catalog() {
 }
 
 #[test]
+fn org_rollout_plan_and_dry_run_apply_are_machine_readable() {
+    let temp_root = unique_temp_dir("gca-cli-org-rollout");
+    let fake_home = temp_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    let repo_list_path = temp_root.join("repos.json");
+    fs::write(
+        &repo_list_path,
+        serde_json::to_string_pretty(&json!({
+            "repos": [
+                {
+                    "repo_id": "greenticai/current",
+                    "default_branch": "main",
+                    "archived": false,
+                    "workflow_content": gca_oci::render_github_workflow()
+                },
+                {
+                    "repo_id": "greenticai/missing",
+                    "default_branch": "main",
+                    "archived": false
+                },
+                {
+                    "repo_id": "greenticai/outdated",
+                    "default_branch": "main",
+                    "archived": false,
+                    "workflow_content": "name: old\n"
+                },
+                {
+                    "repo_id": "greenticai/archived",
+                    "default_branch": "main",
+                    "archived": true
+                }
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut plan = Command::cargo_bin("greentic-coding-agent").unwrap();
+    plan.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "org",
+        "plan-index-rollout",
+        "--org",
+        "greenticai",
+        "--repo-source",
+        "repo-list-file",
+        "--repo-list-file",
+        repo_list_path.to_str().unwrap(),
+        "--format",
+        "json",
+    ]);
+    let output = plan.assert().success().get_output().stdout.clone();
+    let plan_path = temp_root.join("rollout-plan.json");
+    fs::write(&plan_path, &output).unwrap();
+    let stdout = String::from_utf8(output).unwrap();
+    assert!(stdout.contains("\"action\": \"already_enabled\""));
+    assert!(stdout.contains("\"action\": \"create_pr\""));
+    assert!(stdout.contains("\"action\": \"update_existing_workflow\""));
+    assert!(stdout.contains("\"action\": \"skip\""));
+
+    let mut apply = Command::cargo_bin("greentic-coding-agent").unwrap();
+    apply.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "org",
+        "apply-index-rollout",
+        "--plan",
+        plan_path.to_str().unwrap(),
+        "--dry-run",
+        "--open-prs",
+        "--format",
+        "json",
+    ]);
+    apply.assert().success().stdout(
+        predicate::str::contains("\"dry_run\": true")
+            .and(predicate::str::contains("\"status\": \"dry_run\""))
+            .and(predicate::str::contains("\"status\": \"skipped\"")),
+    );
+}
+
+#[test]
 fn repo_name_only_catalog_warns_and_migrates_on_write() {
     let temp_root = unique_temp_dir("gca-cli-catalog-migration");
     let fake_home = temp_root.join("home");
@@ -1096,6 +1373,64 @@ fn validate_plan_reports_owner_hints_and_validations() {
             .and(predicate::str::contains("\"owner_repo\":"))
             .and(predicate::str::contains("\"required_validations\": [")),
     );
+}
+
+#[test]
+fn validate_plan_blocks_unacknowledged_breaking_update_commands() {
+    let temp_root = unique_temp_dir("gca-cli-validate-plan-update");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let plan_path = repo_root.join("plan.json");
+    fs::write(
+        &plan_path,
+        r#"{"summary":"Create a component with gtc component new"}"#,
+    )
+    .unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .arg("analyze");
+    analyze.assert().success();
+
+    let mut validate = Command::cargo_bin("greentic-coding-agent").unwrap();
+    validate
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "validate-plan",
+            plan_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ]);
+    validate.assert().failure().stdout(
+        predicate::str::contains("must be acknowledged")
+            .and(predicate::str::contains("component_answers_flow")),
+    );
+
+    fs::write(
+        &plan_path,
+        r#"{"summary":"Create a component with gtc component new","acknowledged_updates":["unknown/demo-repo::component_answers_flow"]}"#,
+    )
+    .unwrap();
+    let mut acknowledged = Command::cargo_bin("greentic-coding-agent").unwrap();
+    acknowledged
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "validate-plan",
+            plan_path.to_str().unwrap(),
+            "--format",
+            "json",
+        ]);
+    acknowledged
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"acknowledged_updates\":"));
 }
 
 #[test]
@@ -1456,6 +1791,8 @@ fn create_demo_repo(repo_root: &Path) {
     fs::create_dir_all(repo_root.join("docs")).unwrap();
     fs::create_dir_all(repo_root.join(".codex")).unwrap();
     fs::create_dir_all(repo_root.join(".github").join("workflows")).unwrap();
+    fs::create_dir_all(repo_root.join(".greentic").join("training")).unwrap();
+    fs::create_dir_all(repo_root.join(".greentic").join("updates")).unwrap();
     fs::create_dir_all(repo_root.join("src")).unwrap();
     fs::create_dir_all(repo_root.join("examples")).unwrap();
     fs::write(
@@ -1491,6 +1828,96 @@ fn create_demo_repo(repo_root: &Path) {
     fs::write(
         repo_root.join("examples").join("demo.md"),
         "# Example\n\nGreentic-sorla walkthrough.\n",
+    )
+    .unwrap();
+    fs::write(
+        repo_root
+            .join(".greentic")
+            .join("training")
+            .join("create-demo-component.course.v1.json"),
+        r#"{
+          "version": "v1",
+          "id": "create_demo_component",
+          "title": "Create demo component",
+          "summary": "Create a demo component with the current wizard answers flow.",
+          "owner_repo": "greentic-component",
+          "teaches_concepts": ["component", "wizard"],
+          "tasks": ["create a component"],
+          "audience": ["coding_agent"],
+          "lifecycle_phase": "build",
+          "modules": [{
+            "id": "answers",
+            "title": "Answers flow",
+            "objective": "Create component files from answers.",
+            "steps": [{
+              "order": 1,
+              "instruction": "Apply answers through the wizard.",
+              "command": "greentic-flow wizard --answers answers.json",
+              "expected_output": "Component files are generated.",
+              "validation": "greentic-flow component-qa --answers answers.json"
+            }]
+          }],
+          "canonical_commands": ["greentic-flow wizard --answers answers.json"],
+          "deprecated_commands": [{
+            "command": "gtc component new",
+            "reason": "The current component flow is answers driven.",
+            "replacement": "greentic-flow wizard --answers answers.json"
+          }],
+          "required_validations": ["greentic-flow component-qa --answers answers.json"],
+          "examples": [],
+          "source_paths": []
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        repo_root
+            .join(".greentic")
+            .join("updates")
+            .join("component-answers-flow.update.v1.json"),
+        r#"{
+          "version": "v1",
+          "id": "component_answers_flow",
+          "title": "Component creation uses wizard answers",
+          "summary": "Agents must use the current wizard answers flow for component creation.",
+          "owner_repo": "greentic-component",
+          "update_type": "deprecated_command",
+          "published_at": "2026-04-26",
+          "effective_from": "2026-04-26",
+          "expires_at": null,
+          "affected_concepts": ["component", "wizard"],
+          "affected_workflows": ["component_creation"],
+          "affected_courses": ["create_demo_component"],
+          "affected_repos": ["greentic-component"],
+          "agent_instruction": "Use greentic-flow component-schema and greentic-flow wizard --answers answers.json.",
+          "human_summary": "Old component creation commands are stale.",
+          "new_capabilities": [{
+            "id": "component_answers",
+            "title": "Component answers flow",
+            "summary": "Components are created through a schema and answers file.",
+            "use_when": ["create a component"],
+            "owner_repo": "greentic-component",
+            "related_course": "create_demo_component"
+          }],
+          "deprecated_commands": [{
+            "command": "gtc component new",
+            "reason": "The current flow is schema and answers driven.",
+            "replacement": "greentic-flow wizard --answers answers.json"
+          }],
+          "replaced_guidance": [{
+            "old_guidance": "Run gtc component new.",
+            "replacement_guidance": "Capture schema, write answers.json, then run greentic-flow wizard --answers answers.json.",
+            "reason": "The wizard answers contract is now authoritative."
+          }],
+          "migration_steps": [{
+            "order": 1,
+            "instruction": "Replace old component creation commands with the answers flow.",
+            "command": "greentic-flow component-schema",
+            "validation": "greentic-flow component-qa --answers answers.json"
+          }],
+          "required_validations": ["greentic-flow component-qa --answers answers.json"],
+          "source_paths": [],
+          "severity": "breaking"
+        }"#,
     )
     .unwrap();
     fs::write(

@@ -20,6 +20,14 @@ This directory contains committed example artifacts for the current implemented 
   Example HTTP `/search` request body.
 - `plan.v1.json`
   Example plan file that can be checked with `validate-plan`.
+- `training/create-component.course.v1.json`
+  Minimal example authored training course for the component wizard and answers flow.
+- `training/greentic-*/*.course.v1.json`
+  Seed courses that core Greentic repos can copy into `.greentic/training/`, covering components, packs, bundles, flows, greentic-dev launchers, and shared greentic-types contracts.
+- `updates/component-creation-uses-wizard-answers.update.v1.json`
+  Minimal example knowledge update warning that component creation uses the wizard answers flow.
+- `updates/greentic-*/*.update.v1.json`
+  Seed knowledge updates that core Greentic repos can copy into `.greentic/updates/`, including component wizard answers and extension-pack control hooks.
 
 Runnable examples:
 
@@ -30,4 +38,8 @@ cargo run -p greentic-coding-agent -- serve --format json
 cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.describe-repo.json --format json
 cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.search-all.json --format json
 cargo run -p greentic-coding-agent -- validate-plan examples/plan.v1.json --format markdown
+cargo run -p greentic-coding-agent -- course recommend --task "create a component" --format json
+cargo run -p greentic-coding-agent -- updates --task "create a component" --format json
+cargo test -p gca-core --test examples all_training_course_examples_load_and_validate
+cargo test -p gca-core --test examples all_knowledge_update_examples_load_and_validate
 ```

@@ -1,0 +1,83 @@
+{
+  "version": "v1",
+  "id": "component_creation_uses_wizard_answers",
+  "title": "Component Creation Uses Wizard Answers",
+  "summary": "Component creation must use the current schema and answers wizard flow instead of obsolete one-shot create commands.",
+  "owner_repo": "greentic-component",
+  "update_type": "deprecated_command",
+  "published_at": "2026-04-26",
+  "effective_from": "2026-04-26",
+  "expires_at": null,
+  "affected_concepts": [
+    "component",
+    "wizard"
+  ],
+  "affected_workflows": [
+    "component_creation"
+  ],
+  "affected_courses": [
+    "create_component"
+  ],
+  "affected_repos": [
+    "greenticai/greentic-component",
+    "greenticai/greentic-flow"
+  ],
+  "agent_instruction": "When creating a Greentic component, capture the component schema, create a reviewed answers.json file, run the wizard with --answers, then run component QA. Do not use remembered component create shortcuts.",
+  "human_summary": "The authoritative component creation path is schema and answers driven.",
+  "new_capabilities": [
+    {
+      "id": "component_answers_flow",
+      "title": "Component Answers Flow",
+      "summary": "Components are generated from a checked answers.json file that matches the current wizard schema.",
+      "use_when": [
+        "create component",
+        "create greentic component",
+        "build wasm component"
+      ],
+      "owner_repo": "greentic-component",
+      "related_course": "create_component"
+    }
+  ],
+  "deprecated_commands": [
+    {
+      "command": "gtc component new",
+      "reason": "The shorthand command does not capture the current schema-backed answers contract.",
+      "replacement": "greentic-flow component-schema && greentic-flow wizard --answers answers.json"
+    },
+    {
+      "command": "greentic-component create",
+      "reason": "One-shot creation hides the answers file that agents and reviewers need.",
+      "replacement": "greentic-flow wizard --answers answers.json"
+    }
+  ],
+  "replaced_guidance": [
+    {
+      "old_guidance": "Create components with a one-shot create command.",
+      "replacement_guidance": "Capture the schema, write answers.json, apply the wizard answers flow, then run component QA.",
+      "reason": "The schema-backed answers file is the reviewable contract for current component creation."
+    }
+  ],
+  "migration_steps": [
+    {
+      "order": 1,
+      "instruction": "Capture the current component schema.",
+      "command": "greentic-flow component-schema > component.schema.json",
+      "validation": "test -s component.schema.json"
+    },
+    {
+      "order": 2,
+      "instruction": "Apply a reviewed answers.json file through the wizard.",
+      "command": "greentic-flow wizard --answers answers.json",
+      "validation": "greentic-flow component-qa --answers answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-flow component-qa --answers answers.json",
+    "cargo component build --target wasm32-wasip2",
+    "bash ci/local_check.sh"
+  ],
+  "source_paths": [
+    "examples/updates/greentic-component/component-creation-uses-wizard-answers.update.v1.json"
+  ],
+  "severity": "breaking"
+}

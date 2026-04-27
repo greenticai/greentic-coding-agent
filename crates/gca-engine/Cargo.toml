@@ -1,0 +1,24 @@
+[package]
+name = "gca-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+publish = false
+
+[dependencies]
+gca-agent-files = { path = "../gca-agent-files" }
+gca-core = { path = "../gca-core" }
+gca-greentic = { path = "../gca-greentic" }
+gca-index = { path = "../gca-index" }
+gca-mcp = { path = "../gca-mcp" }
+gca-oci = { path = "../gca-oci" }
+gca-query = { path = "../gca-query" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13"

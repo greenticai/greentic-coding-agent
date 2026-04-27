@@ -116,6 +116,8 @@ fn kind_matches(mode: SearchMode, kind: &str) -> bool {
         SearchMode::Instruction => kind == "instruction",
         SearchMode::Concept => kind == "concept",
         SearchMode::Reuse => kind == "reuse",
+        SearchMode::Course => kind == "course",
+        SearchMode::Update => kind == "update",
     }
 }
 
@@ -124,6 +126,8 @@ fn result_type_for_kind(kind: &str) -> SearchResultType {
         "instruction" => SearchResultType::Instruction,
         "concept" => SearchResultType::Concept,
         "reuse" => SearchResultType::Reuse,
+        "course" => SearchResultType::Course,
+        "update" => SearchResultType::Update,
         _ => SearchResultType::Code,
     }
 }

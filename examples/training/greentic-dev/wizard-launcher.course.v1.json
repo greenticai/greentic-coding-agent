@@ -1,0 +1,68 @@
+{
+  "version": "v1",
+  "id": "wizard_launcher",
+  "title": "Use the Greentic Wizard Launcher",
+  "summary": "Expose repository wizards through greentic-dev launcher commands while preserving schema and answers contracts.",
+  "owner_repo": "greentic-dev",
+  "teaches_concepts": [
+    "wizard",
+    "setup",
+    "agent_training_course"
+  ],
+  "tasks": [
+    "add wizard launcher",
+    "expose wizard",
+    "run repo wizard"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "launcher_contract",
+      "title": "Define the Launcher Contract",
+      "objective": "Make wizard schema, answers, and apply modes available through greentic-dev.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Expose the repository wizard schema through the launcher.",
+          "command": "greentic-dev wizard --schema",
+          "expected_output": "The launcher prints the current wizard schema.",
+          "validation": "greentic-dev wizard --schema"
+        },
+        {
+          "order": 2,
+          "instruction": "Run the wizard through a checked answers file.",
+          "command": "greentic-dev wizard --answers answers.json",
+          "expected_output": "The launcher delegates to the owning repo wizard."
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-dev wizard --schema",
+    "greentic-dev wizard --answers answers.json",
+    "greentic-dev coverage",
+    "bash ci/local_check.sh"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "call private wizard binaries directly",
+      "reason": "Agents should use the launcher so schema and answers contracts are stable.",
+      "replacement": "greentic-dev wizard --answers answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-dev coverage",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-dev/wizard-launcher.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/wizard-launcher.course.v1.json",
+    "examples/training/greentic-dev/wizard-launcher.course.v1.json"
+  ]
+}

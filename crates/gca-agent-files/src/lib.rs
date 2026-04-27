@@ -1,4 +1,4 @@
-use gca_core::RepoIndex;
+use gca_core::{KnowledgeUpdateDescriptor, KnowledgeUpdateSeverity, RepoIndex};
 use gca_query::command_catalog;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -95,6 +95,8 @@ fn render_agents(repo_index: &RepoIndex) -> String {
     }
     out.push('\n');
 
+    push_recent_knowledge_updates(&mut out, repo_index);
+
     out.push_str("## Mandatory Validations\n");
     for validation in repo_index.validations.iter().take(5) {
         out.push_str(&format!("- `{}`: {}\n", validation.id, validation.summary));
@@ -130,6 +132,8 @@ fn render_claude(repo_index: &RepoIndex) -> String {
     out.push_str("- Check impact before editing shared concepts.\n");
     out.push_str("- Prefer seeded owner lookup before changing cross-repo contracts.\n\n");
 
+    push_recent_knowledge_updates(&mut out, repo_index);
+
     out.push_str("## Validation Reminders\n");
     for validation in repo_index.validations.iter().take(4) {
         out.push_str(&format!(
@@ -155,6 +159,8 @@ fn render_codex(repo_index: &RepoIndex) -> String {
     out.push_str("## Execution Expectations\n");
     out.push_str("- Complete the requested task end-to-end when safe.\n");
     out.push_str("- Prefer deterministic local validation before finishing.\n\n");
+
+    push_recent_knowledge_updates(&mut out, repo_index);
 
     out.push_str("## Required Checks\n");
     out.push_str("- `bash ci/local_check.sh`\n");
@@ -184,11 +190,115 @@ fn render_llms(repo_index: &RepoIndex) -> String {
     if repo_index.instruction_paths.is_empty() {
         out.push_str("- No instruction docs indexed yet.\n");
     }
+    out.push_str("\nRecent knowledge updates:\n");
+    let updates = recent_knowledge_updates(repo_index);
+    for update in &updates {
+        out.push_str(&format!(
+            "- {}: {} ({})\n",
+            update
+                .effective_from
+                .as_deref()
+                .unwrap_or(&update.published_at),
+            update.summary,
+            update.severity.as_str()
+        ));
+    }
+    if updates.is_empty() {
+        out.push_str("- No high-signal knowledge updates indexed yet.\n");
+    }
     out.push_str("\nUseful commands:\n");
     for entry in command_catalog().into_iter().take(8) {
         out.push_str(&format!("- {}\n", entry.command));
     }
     out
+}
+
+fn push_recent_knowledge_updates(out: &mut String, repo_index: &RepoIndex) {
+    out.push_str("## Recent knowledge updates\n");
+    let updates = recent_knowledge_updates(repo_index);
+    for update in &updates {
+        out.push_str(&format!(
+            "- {}: {} [{}]\n",
+            update
+                .effective_from
+                .as_deref()
+                .unwrap_or(&update.published_at),
+            update.summary,
+            update.severity.as_str()
+        ));
+    }
+    if updates.is_empty() {
+        out.push_str("- No high-signal knowledge updates indexed yet.\n");
+    }
+    out.push('\n');
+}
+
+fn recent_knowledge_updates(repo_index: &RepoIndex) -> Vec<&KnowledgeUpdateDescriptor> {
+    let concept_ids = repo_index
+        .concept_graph
+        .iter()
+        .map(|concept| concept.id.as_str())
+        .collect::<Vec<_>>();
+    let course_ids = repo_index
+        .training_courses
+        .iter()
+        .map(|course| course.id.as_str())
+        .collect::<Vec<_>>();
+    let mut updates = repo_index
+        .knowledge_updates
+        .iter()
+        .filter(|update| high_signal_severity(update.severity))
+        .filter(|update| !is_expired(update))
+        .filter(|update| update_affects_repo(update, repo_index, &concept_ids, &course_ids))
+        .collect::<Vec<_>>();
+    updates.sort_by(|left, right| {
+        right
+            .effective_from
+            .as_ref()
+            .unwrap_or(&right.published_at)
+            .cmp(left.effective_from.as_ref().unwrap_or(&left.published_at))
+            .then(left.id.cmp(&right.id))
+    });
+    updates.truncate(5);
+    updates
+}
+
+fn high_signal_severity(severity: KnowledgeUpdateSeverity) -> bool {
+    matches!(
+        severity,
+        KnowledgeUpdateSeverity::Important
+            | KnowledgeUpdateSeverity::Breaking
+            | KnowledgeUpdateSeverity::Critical
+    )
+}
+
+fn is_expired(update: &KnowledgeUpdateDescriptor) -> bool {
+    update
+        .expires_at
+        .as_deref()
+        .is_some_and(|expires_at| !expires_at.is_empty() && expires_at <= "2026-04-26")
+}
+
+fn update_affects_repo(
+    update: &KnowledgeUpdateDescriptor,
+    repo_index: &RepoIndex,
+    concept_ids: &[&str],
+    course_ids: &[&str],
+) -> bool {
+    update.owner_repo == repo_index.repo_name
+        || update.owner_repo == repo_index.repo_id
+        || update
+            .affected_repos
+            .iter()
+            .any(|repo| repo == &repo_index.repo_name || repo == &repo_index.repo_id)
+        || update
+            .affected_concepts
+            .iter()
+            .any(|concept| concept_ids.iter().any(|candidate| candidate == concept))
+        || update
+            .affected_courses
+            .iter()
+            .any(|course| course_ids.iter().any(|candidate| candidate == course))
 }
 
 fn generated_provenance() -> String {
@@ -227,7 +337,9 @@ fn repo_role_label(repo_index: &RepoIndex) -> &'static str {
 mod tests {
     use super::{render_generated_files, write_generated_files};
     use gca_core::{
-        ConceptDescriptor, FreshnessStatus, InstructionDescriptor, KnowledgeScope, LifecyclePhase,
+        CapabilityAnnouncement, ConceptDescriptor, DeprecatedCommandDescriptor, FreshnessStatus,
+        InstructionDescriptor, KnowledgeScope, KnowledgeUpdateDescriptor, KnowledgeUpdateSeverity,
+        KnowledgeUpdateType, LifecyclePhase, MigrationStepDescriptor, ReplacedGuidanceDescriptor,
         RepoAgentManifest, RepoIndex, RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor,
         WorkflowDescriptor,
     };
@@ -243,11 +355,22 @@ mod tests {
             .unwrap();
         assert!(agents.content.contains("## Top Workflows"));
         assert!(agents.content.contains("## Reuse Warnings"));
+        assert!(agents.content.contains("## Recent knowledge updates"));
+        assert!(
+            agents
+                .content
+                .contains("Component creation must use answers")
+        );
         let codex = files
             .iter()
             .find(|file| file.file_name == "CODEX.md")
             .unwrap();
         assert!(codex.content.contains("## Required Checks"));
+        assert!(
+            codex
+                .content
+                .contains("Component creation must use answers")
+        );
         let llms = files
             .iter()
             .find(|file| file.file_name == "llms.txt")
@@ -358,6 +481,51 @@ mod tests {
                 forbidden_locations: vec!["customer-solution".to_string()],
                 required_validations: vec!["shared_schema_changed".to_string()],
             }],
+            training_courses: Vec::new(),
+            knowledge_updates: vec![KnowledgeUpdateDescriptor {
+                version: "v1".to_string(),
+                id: "component_answers".to_string(),
+                title: "Component answers".to_string(),
+                summary: "Component creation must use answers.".to_string(),
+                owner_repo: "greentic-coding-agent".to_string(),
+                update_type: KnowledgeUpdateType::DeprecatedCommand,
+                published_at: "2026-04-26".to_string(),
+                effective_from: Some("2026-04-26".to_string()),
+                expires_at: None,
+                affected_concepts: vec!["digital_worker".to_string()],
+                affected_workflows: vec!["analyze_repo".to_string()],
+                affected_courses: Vec::new(),
+                affected_repos: vec!["greenticai/greentic-coding-agent".to_string()],
+                agent_instruction: "Use answers.".to_string(),
+                human_summary: Some("Use answers.".to_string()),
+                new_capabilities: vec![CapabilityAnnouncement {
+                    id: "answers".to_string(),
+                    title: "Answers".to_string(),
+                    summary: "Answers flow.".to_string(),
+                    use_when: vec!["create component".to_string()],
+                    owner_repo: "greentic-coding-agent".to_string(),
+                    related_course: None,
+                }],
+                deprecated_commands: vec![DeprecatedCommandDescriptor {
+                    command: "old create".to_string(),
+                    reason: "Old".to_string(),
+                    replacement: Some("new create".to_string()),
+                }],
+                replaced_guidance: vec![ReplacedGuidanceDescriptor {
+                    old_guidance: "Old".to_string(),
+                    replacement_guidance: "New".to_string(),
+                    reason: "Changed".to_string(),
+                }],
+                migration_steps: vec![MigrationStepDescriptor {
+                    order: 1,
+                    instruction: "Migrate".to_string(),
+                    command: Some("new create".to_string()),
+                    validation: Some("test".to_string()),
+                }],
+                required_validations: vec!["bash ci/local_check.sh".to_string()],
+                source_paths: vec![".greentic/updates/component.update.v1.json".to_string()],
+                severity: KnowledgeUpdateSeverity::Breaking,
+            }],
             instruction_graph: vec![InstructionDescriptor {
                 id: "readme".to_string(),
                 path: "README.md".to_string(),
@@ -373,6 +541,7 @@ mod tests {
                 crate_names: vec![],
                 modules: vec![],
                 public_items: vec![],
+                rust_symbols: vec![],
                 test_targets: vec![],
                 feature_names: vec![],
                 dependencies: vec![],

@@ -1,0 +1,73 @@
+{
+  "version": "v1",
+  "id": "step_mapping",
+  "title": "Map Flow Step Inputs and Outputs",
+  "summary": "Define and validate flow step mappings so generated flows are replayable and contract-safe.",
+  "owner_repo": "greentic-flow",
+  "teaches_concepts": [
+    "flow",
+    "component",
+    "provider"
+  ],
+  "tasks": [
+    "map flow step",
+    "change step mapping",
+    "wire flow outputs"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "mapping_contract",
+      "title": "Write the Mapping Contract",
+      "objective": "Make all step inputs and outputs explicit before replay.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Generate the component schema for each step and list available input/output fields.",
+          "command": "greentic-flow component-schema --step <step-id>",
+          "expected_output": "Step-level schemas are available for mapping."
+        },
+        {
+          "order": 2,
+          "instruction": "Add or update the mapping file using typed source and target fields.",
+          "command": "greentic-flow add-step --answers step.answers.json",
+          "expected_output": "The flow mapping file includes the new step mapping."
+        },
+        {
+          "order": 3,
+          "instruction": "Validate mapping with replay fixtures.",
+          "command": "greentic-flow replay --flow . --input fixtures/input.json",
+          "expected_output": "Replay succeeds without missing field or type conversion failures.",
+          "validation": "greentic-flow replay --flow . --input fixtures/input.json"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "greentic-flow component-schema --step <step-id>",
+    "greentic-flow add-step --answers step.answers.json",
+    "greentic-flow replay --flow . --input fixtures/input.json"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "rename mapping fields by string replacement",
+      "reason": "String replacement can silently break typed flow contracts.",
+      "replacement": "greentic-flow add-step --answers step.answers.json"
+    }
+  ],
+  "required_validations": [
+    "greentic-flow replay --flow . --input fixtures/input.json",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-flow/step-mapping.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/step-mapping.course.v1.json",
+    "examples/training/greentic-flow/step-mapping.course.v1.json"
+  ]
+}

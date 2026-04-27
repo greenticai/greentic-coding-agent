@@ -1,0 +1,69 @@
+{
+  "version": "v1",
+  "id": "gtc_dev_coding_agent_launcher",
+  "title": "Wire gtc dev coding-agent Launcher",
+  "summary": "Delegate gtc dev coding-agent commands to greentic-coding-agent without duplicating indexing or query logic.",
+  "owner_repo": "greentic-dev",
+  "teaches_concepts": [
+    "repository_index_rollout",
+    "wizard",
+    "setup"
+  ],
+  "tasks": [
+    "wire coding agent launcher",
+    "add gtc dev coding-agent",
+    "delegate coding agent command"
+  ],
+  "audience": [
+    "coding_agent",
+    "human_developer"
+  ],
+  "lifecycle_phase": "build",
+  "modules": [
+    {
+      "id": "delegate",
+      "title": "Delegate to greentic-coding-agent",
+      "objective": "Keep launcher logic thin and delegate behavior to this binary.",
+      "steps": [
+        {
+          "order": 1,
+          "instruction": "Resolve the installed greentic-coding-agent binary and pass through subcommands and arguments.",
+          "command": "gtc dev coding-agent analyze --print --format json",
+          "expected_output": "The launcher delegates to greentic-coding-agent analyze."
+        },
+        {
+          "order": 2,
+          "instruction": "Verify query commands pass through without changing JSON shape.",
+          "command": "gtc dev coding-agent search --mode instruction wizard --format json",
+          "expected_output": "Search JSON matches greentic-coding-agent output.",
+          "validation": "gtc dev coding-agent search --mode instruction wizard --format json"
+        }
+      ]
+    }
+  ],
+  "canonical_commands": [
+    "gtc dev coding-agent analyze --print --format json",
+    "gtc dev coding-agent search --mode instruction wizard --format json",
+    "greentic-dev coverage",
+    "bash ci/local_check.sh"
+  ],
+  "deprecated_commands": [
+    {
+      "command": "reimplement index analysis inside greentic-dev",
+      "reason": "greentic-coding-agent owns the index, query, and MCP behavior.",
+      "replacement": "delegate to greentic-coding-agent"
+    }
+  ],
+  "required_validations": [
+    "gtc dev coding-agent search --mode instruction wizard --format json",
+    "greentic-dev coverage",
+    "bash ci/local_check.sh"
+  ],
+  "examples": [
+    "examples/training/greentic-dev/gtc-dev-coding-agent-launcher.course.v1.json"
+  ],
+  "source_paths": [
+    ".greentic/training/gtc-dev-coding-agent-launcher.course.v1.json",
+    "examples/training/greentic-dev/gtc-dev-coding-agent-launcher.course.v1.json"
+  ]
+}

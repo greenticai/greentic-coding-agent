@@ -10,6 +10,7 @@ description = "Greentic coding-agent CLI scaffold and workspace entrypoint."
 readme = "../../README.md"
 keywords = ["greentic", "codex", "mcp", "cli", "automation"]
 categories = ["command-line-utilities", "development-tools"]
+publish = false
 include = [
     "LICENSE",
     "src/**",
@@ -32,6 +33,9 @@ pkg-fmt = "zip"
 
 [dependencies]
 clap.workspace = true
+gca-core = { path = "../gca-core" }
+gca-engine = { path = "../gca-engine" }
+gca-oci = { path = "../gca-oci" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

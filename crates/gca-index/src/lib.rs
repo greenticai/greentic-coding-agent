@@ -1,8 +1,12 @@
+mod extract;
 mod tantivy_index;
 
+use extract::cargo_metadata::extract_cargo_metadata;
+use extract::rust_symbols::extract_rust_symbols;
 use gca_core::{
-    FreshnessStatus, InstructionDescriptor, RegistryEntry, RepoAgentManifest, RepoId, RepoIndex,
-    SourceStats, builtin_concepts, load_registry, write_registry,
+    FreshnessStatus, InstructionDescriptor, KnowledgeUpdateDescriptor, RegistryEntry,
+    RepoAgentManifest, RepoId, RepoIndex, SourceStats, TrainingCourseDescriptor, builtin_concepts,
+    load_registry, write_registry,
 };
 use gca_greentic::{
     EnrichmentInput, infer_concepts, infer_repo_role, infer_workflows, known_command_matches,
@@ -15,8 +19,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 const LOCAL_INDEX_DIR: &str = ".greentic-agent";
+const TRAINING_DIR: &str = ".greentic/training";
+const UPDATES_DIR: &str = ".greentic/updates";
 
-pub use tantivy_index::{TantivyBuildReport, TantivyIndexError, build_local_tantivy_index};
+pub use tantivy_index::{
+    TantivyBuildReport, TantivyIndexError, build_local_tantivy_index, build_merged_tantivy_index,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fingerprints {
@@ -94,7 +102,14 @@ pub fn analyze_repo(
     let cargo_manifests = find_cargo_manifests(&repo_root);
     let tracked_files = find_tracked_files(&repo_root);
     let source_stats = build_source_stats(&repo_root, &cargo_manifests);
-    let instruction_scan = build_instruction_graph(&repo_root, &source_stats);
+    let training_courses = load_training_courses(&repo_root);
+    let knowledge_updates = load_knowledge_updates(&repo_root);
+    let instruction_scan = build_instruction_graph(
+        &repo_root,
+        &source_stats,
+        &training_courses,
+        &knowledge_updates,
+    );
 
     let enrichment = EnrichmentInput {
         repo_name: repo_name.clone(),
@@ -151,6 +166,8 @@ pub fn analyze_repo(
         workflow_graph,
         validations: policy.validations,
         reuse: policy.reuse,
+        training_courses,
+        knowledge_updates,
         instruction_graph: instruction_scan.descriptors,
         instruction_paths: instruction_scan.paths,
         source_stats,
@@ -324,33 +341,41 @@ fn find_tracked_files(repo_root: &Path) -> Vec<String> {
 }
 
 fn build_source_stats(repo_root: &Path, cargo_manifests: &[String]) -> SourceStats {
+    let cargo_metadata = extract_cargo_metadata(repo_root);
     let mut workspace_members = Vec::new();
     let mut crate_names = Vec::new();
     let mut feature_names = Vec::new();
     let mut dependencies = Vec::new();
 
-    for manifest_path in cargo_manifests {
-        let raw = fs::read_to_string(repo_root.join(manifest_path)).unwrap_or_default();
-        if is_workspace_manifest(manifest_path) {
-            workspace_members.extend(parse_workspace_members(&raw));
+    if let Some(metadata) = &cargo_metadata {
+        workspace_members.extend(metadata.workspace_members.clone());
+        crate_names.extend(metadata.crate_names.clone());
+        feature_names.extend(metadata.feature_names.clone());
+        dependencies.extend(metadata.dependencies.clone());
+    } else {
+        for manifest_path in cargo_manifests {
+            let raw = fs::read_to_string(repo_root.join(manifest_path)).unwrap_or_default();
+            if is_workspace_manifest(manifest_path) {
+                workspace_members.extend(parse_workspace_members(&raw));
+            }
+            if let Some(crate_name) = parse_manifest_string(&raw, "name") {
+                crate_names.push(crate_name);
+            }
+            feature_names.extend(parse_feature_names(&raw));
+            dependencies.extend(parse_dependency_names(&raw));
         }
-        if let Some(crate_name) = parse_manifest_string(&raw, "name") {
-            crate_names.push(crate_name);
-        }
-        feature_names.extend(parse_feature_names(&raw));
-        dependencies.extend(parse_dependency_names(&raw));
     }
 
-    let mut modules = Vec::new();
-    let mut public_items = Vec::new();
-    let mut test_targets = Vec::new();
-    gather_rust_sources(
-        repo_root,
-        repo_root,
-        &mut modules,
-        &mut public_items,
-        &mut test_targets,
-    );
+    let rust_symbols = extract_rust_symbols(repo_root);
+    let mut modules = rust_symbols.modules;
+    let mut public_items = rust_symbols.public_items;
+    let mut test_targets = rust_symbols.test_targets;
+    let rust_symbols = rust_symbols.symbols;
+
+    if let Some(metadata) = &cargo_metadata {
+        modules.extend(metadata.crate_root_paths.clone());
+        test_targets.extend(metadata.test_targets.clone());
+    }
 
     let mut markdown_docs = Vec::new();
     gather_docs(repo_root, repo_root, &mut markdown_docs);
@@ -377,6 +402,7 @@ fn build_source_stats(repo_root: &Path, cargo_manifests: &[String]) -> SourceSta
         crate_names,
         modules,
         public_items,
+        rust_symbols,
         test_targets,
         feature_names,
         dependencies,
@@ -386,7 +412,12 @@ fn build_source_stats(repo_root: &Path, cargo_manifests: &[String]) -> SourceSta
     }
 }
 
-fn build_instruction_graph(repo_root: &Path, source_stats: &SourceStats) -> InstructionScan {
+fn build_instruction_graph(
+    repo_root: &Path,
+    source_stats: &SourceStats,
+    training_courses: &[TrainingCourseDescriptor],
+    knowledge_updates: &[KnowledgeUpdateDescriptor],
+) -> InstructionScan {
     let mut descriptors = Vec::new();
     let mut commands = Vec::new();
 
@@ -424,6 +455,133 @@ fn build_instruction_graph(repo_root: &Path, source_stats: &SourceStats) -> Inst
         });
     }
 
+    for course in training_courses {
+        commands.extend(course.canonical_commands.clone());
+        commands.extend(
+            course
+                .modules
+                .iter()
+                .flat_map(|module| module.steps.iter())
+                .filter_map(|step| step.command.clone()),
+        );
+        let mut headings = Vec::new();
+        headings.push(course.summary.clone());
+        headings.extend(course.tasks.clone());
+        headings.extend(
+            course
+                .modules
+                .iter()
+                .map(|module| format!("{}: {}", module.title, module.objective)),
+        );
+        headings.extend(course.examples.clone());
+        let mut concept_ids = course.teaches_concepts.clone();
+        concept_ids.push("agent_training_course".to_string());
+        dedup_sorted(&mut concept_ids);
+        descriptors.push(InstructionDescriptor {
+            id: format!("training_{}", sanitize_id(&course.id)),
+            path: course
+                .source_paths
+                .first()
+                .cloned()
+                .unwrap_or_else(|| format!("{TRAINING_DIR}/{}.course.v1.json", course.id)),
+            title: course.title.clone(),
+            kind: "training_course".to_string(),
+            headings,
+            commands: course.canonical_commands.clone(),
+            concept_ids,
+        });
+    }
+
+    for update in knowledge_updates {
+        commands.extend(
+            update
+                .deprecated_commands
+                .iter()
+                .map(|command| command.command.clone()),
+        );
+        commands.extend(
+            update
+                .deprecated_commands
+                .iter()
+                .filter_map(|command| command.replacement.clone()),
+        );
+        commands.extend(
+            update
+                .migration_steps
+                .iter()
+                .filter_map(|step| step.command.clone()),
+        );
+        let mut headings = vec![
+            update.summary.clone(),
+            update.agent_instruction.clone(),
+            update.update_type.as_str().to_string(),
+            update.severity.as_str().to_string(),
+        ];
+        if let Some(summary) = &update.human_summary {
+            headings.push(summary.clone());
+        }
+        headings.extend(update.affected_workflows.clone());
+        headings.extend(update.affected_courses.clone());
+        headings.extend(
+            update
+                .new_capabilities
+                .iter()
+                .flat_map(|capability| {
+                    [
+                        capability.title.clone(),
+                        capability.summary.clone(),
+                        capability.use_when.join(" "),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        headings.extend(
+            update
+                .replaced_guidance
+                .iter()
+                .flat_map(|guidance| {
+                    [
+                        guidance.old_guidance.clone(),
+                        guidance.replacement_guidance.clone(),
+                        guidance.reason.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        );
+        headings.extend(
+            update
+                .migration_steps
+                .iter()
+                .map(|step| step.instruction.clone()),
+        );
+        let mut concept_ids = update.affected_concepts.clone();
+        concept_ids.push("knowledge_update".to_string());
+        dedup_sorted(&mut concept_ids);
+        descriptors.push(InstructionDescriptor {
+            id: format!("update_{}", sanitize_id(&update.id)),
+            path: update
+                .source_paths
+                .first()
+                .cloned()
+                .unwrap_or_else(|| format!("{UPDATES_DIR}/{}.update.v1.json", update.id)),
+            title: update.title.clone(),
+            kind: "knowledge_update".to_string(),
+            headings,
+            commands: update
+                .migration_steps
+                .iter()
+                .filter_map(|step| step.command.clone())
+                .chain(
+                    update
+                        .deprecated_commands
+                        .iter()
+                        .map(|command| command.command.clone()),
+                )
+                .collect(),
+            concept_ids,
+        });
+    }
+
     dedup_sorted(&mut commands);
     descriptors.sort_by(|left, right| left.path.cmp(&right.path));
 
@@ -432,6 +590,84 @@ fn build_instruction_graph(repo_root: &Path, source_stats: &SourceStats) -> Inst
         descriptors,
         commands,
     }
+}
+
+fn load_training_courses(repo_root: &Path) -> Vec<TrainingCourseDescriptor> {
+    let training_dir = repo_root.join(TRAINING_DIR);
+    let Ok(entries) = fs::read_dir(&training_dir) else {
+        return Vec::new();
+    };
+
+    let mut courses = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(".course.v1.json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut course) = serde_json::from_str::<TrainingCourseDescriptor>(&raw) else {
+            continue;
+        };
+        if course.validate().is_err() {
+            continue;
+        }
+        let relative = format!("{TRAINING_DIR}/{file_name}");
+        if !course
+            .source_paths
+            .iter()
+            .any(|existing| existing == &relative)
+        {
+            course.source_paths.push(relative);
+        }
+        course.source_paths.sort();
+        courses.push(course);
+    }
+    courses.sort_by(|left, right| left.id.cmp(&right.id));
+    courses
+}
+
+fn load_knowledge_updates(repo_root: &Path) -> Vec<KnowledgeUpdateDescriptor> {
+    let updates_dir = repo_root.join(UPDATES_DIR);
+    let Ok(entries) = fs::read_dir(&updates_dir) else {
+        return Vec::new();
+    };
+
+    let mut updates = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(".update.v1.json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(mut update) = serde_json::from_str::<KnowledgeUpdateDescriptor>(&raw) else {
+            continue;
+        };
+        if update.validate().is_err() {
+            continue;
+        }
+        let relative = format!("{UPDATES_DIR}/{file_name}");
+        if !update
+            .source_paths
+            .iter()
+            .any(|existing| existing == &relative)
+        {
+            update.source_paths.push(relative);
+        }
+        update.source_paths.sort();
+        updates.push(update);
+    }
+    updates.sort_by(|left, right| left.id.cmp(&right.id));
+    updates
 }
 
 fn is_workspace_manifest(path: &str) -> bool {
@@ -557,60 +793,6 @@ fn gather_regular_files(root: &Path, current: &Path, output: &mut Vec<String>) {
             gather_regular_files(root, &path, output);
         } else if let Ok(relative) = path.strip_prefix(root) {
             output.push(relative.display().to_string());
-        }
-    }
-}
-
-fn gather_rust_sources(
-    root: &Path,
-    current: &Path,
-    modules: &mut Vec<String>,
-    public_items: &mut Vec<String>,
-    test_targets: &mut Vec<String>,
-) {
-    let Ok(entries) = fs::read_dir(current) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-
-        if should_skip_dir(&name) {
-            continue;
-        }
-
-        if path.is_dir() {
-            gather_rust_sources(root, &path, modules, public_items, test_targets);
-            continue;
-        }
-
-        let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-        if extension != "rs" {
-            continue;
-        }
-
-        let Ok(relative) = path.strip_prefix(root) else {
-            continue;
-        };
-        let relative = relative.display().to_string();
-        modules.push(relative.clone());
-        if relative.contains("/tests/") || relative.starts_with("tests/") {
-            test_targets.push(relative.clone());
-        }
-
-        let raw = fs::read_to_string(&path).unwrap_or_default();
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("#[test]") || trimmed.starts_with("#[tokio::test]") {
-                test_targets.push(relative.clone());
-            }
-            if trimmed.starts_with("pub ") {
-                public_items.push(trimmed.to_string());
-            }
         }
     }
 }
@@ -763,7 +945,7 @@ fn timestamp_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::{analyze_repo, default_registry_path, parse_github_remote_url};
-    use gca_core::load_registry;
+    use gca_core::{SourceStats, load_registry};
     use std::fs;
     use tempfile::tempdir;
 
@@ -816,6 +998,27 @@ mod tests {
                 .iter()
                 .any(|entry| entry.id == "shared_schema_changed")
         );
+        assert!(
+            outputs
+                .repo_index
+                .training_courses
+                .iter()
+                .any(|course| course.id == "create_demo_component")
+        );
+        assert!(
+            outputs
+                .repo_index
+                .knowledge_updates
+                .iter()
+                .any(|update| update.id == "component_answers_flow")
+        );
+        assert!(outputs.repo_index.instruction_graph.iter().any(|entry| {
+            entry.kind == "training_course"
+                && entry
+                    .commands
+                    .iter()
+                    .any(|command| command == "greentic-flow wizard --answers answers.json")
+        }));
 
         let registry = load_registry(&registry_path).unwrap();
         assert_eq!(registry.repos.len(), 1);
@@ -856,10 +1059,100 @@ mod tests {
         assert_eq!(registry.repos.len(), 1);
     }
 
+    #[test]
+    fn analyze_repo_uses_cargo_metadata_and_structured_rust_symbols() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("metadata-repo");
+        create_metadata_repo(&repo_root);
+
+        let outputs = analyze_repo(&repo_root, &default_registry_path(temp.path())).unwrap();
+        let stats = &outputs.repo_index.source_stats;
+
+        assert!(stats.workspace_members.contains(&"crates/api".to_string()));
+        assert!(
+            stats
+                .workspace_members
+                .contains(&"crates/support".to_string())
+        );
+        assert!(stats.crate_names.contains(&"api".to_string()));
+        assert!(stats.crate_names.contains(&"support".to_string()));
+        assert!(stats.dependencies.contains(&"support".to_string()));
+        assert!(stats.feature_names.contains(&"default".to_string()));
+        assert!(stats.feature_names.contains(&"cli".to_string()));
+        assert!(stats.modules.contains(&"crates/api/src/lib.rs".to_string()));
+        assert!(
+            stats
+                .modules
+                .contains(&"crates/api/src/main.rs".to_string())
+        );
+        assert!(
+            stats
+                .test_targets
+                .contains(&"crates/api/tests/smoke.rs".to_string())
+        );
+        assert!(
+            stats
+                .test_targets
+                .contains(&"crates/api/src/lib.rs::api_test".to_string())
+        );
+
+        assert_symbol(
+            stats,
+            "inner::ApiThing",
+            "struct",
+            "pub",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "internal_helper",
+            "function",
+            "pub(crate)",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "ApiThing::build",
+            "function",
+            "pub",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "inner::ApiMode",
+            "enum",
+            "pub",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "inner::ApiBehavior",
+            "trait",
+            "pub",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "inner::ApiThing",
+            "use",
+            "pub",
+            "crates/api/src/lib.rs",
+        );
+        assert_symbol(
+            stats,
+            "api_test",
+            "test",
+            "private",
+            "crates/api/src/lib.rs",
+        );
+    }
+
     fn create_demo_repo(repo_root: &std::path::Path) {
         fs::create_dir_all(repo_root.join(".git").join("refs").join("heads")).unwrap();
         fs::create_dir_all(repo_root.join("docs")).unwrap();
         fs::create_dir_all(repo_root.join(".codex")).unwrap();
+        fs::create_dir_all(repo_root.join(".greentic").join("training")).unwrap();
+        fs::create_dir_all(repo_root.join(".greentic").join("updates")).unwrap();
         fs::create_dir_all(repo_root.join("src")).unwrap();
         fs::create_dir_all(repo_root.join(".github").join("workflows")).unwrap();
         fs::create_dir_all(repo_root.join("examples")).unwrap();
@@ -899,6 +1192,96 @@ mod tests {
         )
         .unwrap();
         fs::write(
+            repo_root
+                .join(".greentic")
+                .join("training")
+                .join("create-demo-component.course.v1.json"),
+            r#"{
+              "version": "v1",
+              "id": "create_demo_component",
+              "title": "Create demo component",
+              "summary": "Create a demo component through the current answers flow.",
+              "owner_repo": "greentic-component",
+              "teaches_concepts": ["component", "wizard"],
+              "tasks": ["create a component"],
+              "audience": ["coding_agent"],
+              "lifecycle_phase": "build",
+              "modules": [{
+                "id": "answers",
+                "title": "Answers flow",
+                "objective": "Use answers rather than obsolete commands.",
+                "steps": [{
+                  "order": 1,
+                  "instruction": "Apply answers through the wizard.",
+                  "command": "greentic-flow wizard --answers answers.json",
+                  "expected_output": "Component files are generated.",
+                  "validation": "greentic-flow component-qa --answers answers.json"
+                }]
+              }],
+              "canonical_commands": ["greentic-flow wizard --answers answers.json"],
+              "deprecated_commands": [{
+                "command": "gtc component new",
+                "reason": "The current flow is schema and answers driven.",
+                "replacement": "greentic-flow wizard --answers answers.json"
+              }],
+              "required_validations": ["greentic-flow component-qa --answers answers.json"],
+              "examples": [],
+              "source_paths": []
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join(".greentic")
+                .join("updates")
+                .join("component-answers-flow.update.v1.json"),
+            r#"{
+              "version": "v1",
+              "id": "component_answers_flow",
+              "title": "Component creation uses wizard answers",
+              "summary": "Agents must use the current wizard answers flow for component creation.",
+              "owner_repo": "greentic-component",
+              "update_type": "deprecated_command",
+              "published_at": "2026-04-26",
+              "effective_from": "2026-04-26",
+              "expires_at": null,
+              "affected_concepts": ["component", "wizard"],
+              "affected_workflows": ["component_creation"],
+              "affected_courses": ["create_demo_component"],
+              "affected_repos": ["greentic-component"],
+              "agent_instruction": "Use greentic-flow component-schema and greentic-flow wizard --answers answers.json.",
+              "human_summary": "Old component creation commands are stale.",
+              "new_capabilities": [{
+                "id": "component_answers",
+                "title": "Component answers flow",
+                "summary": "Components are created through a schema and answers file.",
+                "use_when": ["create a component"],
+                "owner_repo": "greentic-component",
+                "related_course": "create_demo_component"
+              }],
+              "deprecated_commands": [{
+                "command": "gtc component new",
+                "reason": "The current flow is schema and answers driven.",
+                "replacement": "greentic-flow wizard --answers answers.json"
+              }],
+              "replaced_guidance": [{
+                "old_guidance": "Run gtc component new.",
+                "replacement_guidance": "Capture schema, write answers.json, then run greentic-flow wizard --answers answers.json.",
+                "reason": "The wizard answers contract is now authoritative."
+              }],
+              "migration_steps": [{
+                "order": 1,
+                "instruction": "Replace old component creation commands with the answers flow.",
+                "command": "greentic-flow component-schema",
+                "validation": "greentic-flow component-qa --answers answers.json"
+              }],
+              "required_validations": ["greentic-flow component-qa --answers answers.json"],
+              "source_paths": [],
+              "severity": "breaking"
+            }"#,
+        )
+        .unwrap();
+        fs::write(
             repo_root.join(".git").join("HEAD"),
             "ref: refs/heads/main\n",
         )
@@ -917,5 +1300,154 @@ mod tests {
             "abc123\n",
         )
         .unwrap();
+    }
+
+    fn create_metadata_repo(repo_root: &std::path::Path) {
+        fs::create_dir_all(repo_root.join(".git").join("refs").join("heads")).unwrap();
+        fs::create_dir_all(repo_root.join("crates").join("api").join("src")).unwrap();
+        fs::create_dir_all(repo_root.join("crates").join("api").join("tests")).unwrap();
+        fs::create_dir_all(repo_root.join("crates").join("support").join("src")).unwrap();
+        fs::write(
+            repo_root.join(".git").join("HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join(".git")
+                .join("refs")
+                .join("heads")
+                .join("main"),
+            "def456\n",
+        )
+        .unwrap();
+        fs::write(
+            repo_root.join("Cargo.toml"),
+            r#"[workspace]
+members = ["crates/api", "crates/support"]
+resolver = "2"
+
+[workspace.dependencies]
+support = { path = "crates/support" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            repo_root.join("crates").join("api").join("Cargo.toml"),
+            r#"[package]
+name = "api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+support.workspace = true
+
+[dev-dependencies]
+support.workspace = true
+
+[features]
+default = ["cli"]
+cli = []
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "api-bin"
+path = "src/main.rs"
+
+[[test]]
+name = "smoke"
+path = "tests/smoke.rs"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            repo_root.join("crates").join("support").join("Cargo.toml"),
+            r#"[package]
+name = "support"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join("crates")
+                .join("api")
+                .join("src")
+                .join("lib.rs"),
+            r#"pub use inner::ApiThing;
+
+pub(crate) fn internal_helper() {}
+
+pub mod inner {
+    pub struct ApiThing {
+        pub id: String,
+    }
+
+    pub enum ApiMode {
+        Fast,
+    }
+
+    pub trait ApiBehavior {
+        fn run(&self);
+    }
+}
+
+impl inner::ApiThing {
+    pub fn build() -> Self {
+        Self { id: String::new() }
+    }
+}
+
+#[test]
+fn api_test() {}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join("crates")
+                .join("api")
+                .join("src")
+                .join("main.rs"),
+            "fn main() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join("crates")
+                .join("api")
+                .join("tests")
+                .join("smoke.rs"),
+            "#[test]\nfn smoke_test() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            repo_root
+                .join("crates")
+                .join("support")
+                .join("src")
+                .join("lib.rs"),
+            "pub fn support_value() -> u32 { 1 }\n",
+        )
+        .unwrap();
+    }
+
+    fn assert_symbol(stats: &SourceStats, name: &str, kind: &str, visibility: &str, path: &str) {
+        assert!(
+            stats.rust_symbols.iter().any(|symbol| {
+                symbol.name == name
+                    && format!("{:?}", symbol.kind).eq_ignore_ascii_case(kind)
+                    && symbol.visibility == visibility
+                    && symbol.path.starts_with(path)
+            }),
+            "missing symbol {visibility} {kind} {name} in {path}: {:?}",
+            stats.rust_symbols
+        );
     }
 }
