@@ -1,0 +1,8 @@
+{
+  "id": "agent-context-1",
+  "tool": "gca.agent_context",
+  "arguments": {
+    "task": "add static route support",
+    "channel": "develop"
+  }
+}

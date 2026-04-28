@@ -19,4 +19,8 @@ greentic-coding-agent install-github-workflow --catalog public
 greentic-coding-agent install-github-workflow --catalog tenant --tenant meeza
 ```
 
-The generated workflows build the release CLI, analyze the repo, build/check the local Tantivy index, package the index, and publish with `--backend ghcr --token-env GHCR_TOKEN`. Tenant workflows use `TENANT_GHCR_TOKEN` when configured.
+The generated repo workflow runs on pushes to `main` and `develop`, builds the CLI from source, analyzes the repo, builds/checks the local Tantivy index, packages both `:<branch>` and `:sha-<commit>` tags, and publishes them with `--backend ghcr --token-env GHCR_TOKEN`.
+
+The generated catalog workflow also runs on `main` and `develop` and publishes the catalog with `--channel "${{ github.ref_name }}"`, so branch-specific catalog tags such as `catalog:main` and `catalog:develop` stay current.
+
+The workflow needs `contents: read` and `packages: write`. Tenant workflows use `TENANT_GHCR_TOKEN` when configured.

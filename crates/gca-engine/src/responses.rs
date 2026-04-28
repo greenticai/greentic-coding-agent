@@ -95,11 +95,13 @@ pub struct InstallGithubWorkflowResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageIndexResponse {
     pub package: PackageOutput,
+    pub packages: Vec<PackageOutput>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishIndexResponse {
     pub published_path: PathBuf,
+    pub published_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

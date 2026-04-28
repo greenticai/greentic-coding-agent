@@ -1,6 +1,8 @@
 {
   "version": "v1",
   "generated_at": "2026-04-15T00:00:00Z",
+  "catalog_id": "greenticai/public",
+  "default_channel": "main",
   "repos": [
     {
       "repo_id": "greenticai/greentic-coding-agent",
@@ -9,6 +11,16 @@
       "latest_tag": "v0.1.0",
       "package_ref": "ghcr.io/greenticai/indexes/greenticai/greentic-coding-agent:v0.1.0",
       "updated_at": "2026-04-15T00:00:00Z",
+      "default_branch": "main",
+      "preferred_branch": null,
+      "branches": {
+        "main": {
+          "index_uri": "ghcr.io/greenticai/indexes/greenticai/greentic-coding-agent:v0.1.0",
+          "commit_sha": "abc123",
+          "updated_at": "2026-04-15T00:00:00Z",
+          "digest": null
+        }
+      },
       "visibility": "public",
       "tenant": null,
       "required_auth": null,
