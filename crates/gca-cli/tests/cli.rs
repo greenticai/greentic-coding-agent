@@ -18,16 +18,19 @@ fn help_lists_scaffolded_commands() {
 
     command.assert().success().stdout(
         predicate::str::contains("analyze")
+            .and(predicate::str::contains("agent"))
             .and(predicate::str::contains("bootstrap-instructions"))
             .and(predicate::str::contains("check-refresh"))
             .and(predicate::str::contains("commands"))
             .and(predicate::str::contains("concepts"))
             .and(predicate::str::contains("courses"))
             .and(predicate::str::contains("course"))
+            .and(predicate::str::contains("daemon"))
             .and(predicate::str::contains("detect-changes"))
             .and(predicate::str::contains("describe"))
             .and(predicate::str::contains("generate-agent-files"))
             .and(predicate::str::contains("impact"))
+            .and(predicate::str::contains("init"))
             .and(predicate::str::contains("install-github-workflow"))
             .and(predicate::str::contains("list-remote-repos"))
             .and(predicate::str::contains("locate-owner"))
@@ -38,11 +41,85 @@ fn help_lists_scaffolded_commands() {
             .and(predicate::str::contains("search"))
             .and(predicate::str::contains("serve"))
             .and(predicate::str::contains("show-catalog"))
+            .and(predicate::str::contains("status"))
             .and(predicate::str::contains("sync"))
             .and(predicate::str::contains("train"))
             .and(predicate::str::contains("updates"))
             .and(predicate::str::contains("validate-plan"))
+            .and(predicate::str::contains("watch"))
             .and(predicate::str::contains("workflows")),
+    );
+}
+
+#[test]
+fn agent_context_json_uses_local_overlay_and_default_channel() {
+    let temp_root = unique_temp_dir("gca-cli-agent-context");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .arg("analyze");
+    analyze.assert().success();
+
+    let mut command = Command::cargo_bin("greentic-coding-agent").unwrap();
+    command
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "agent",
+            "context",
+            "--task",
+            "add wizard validation",
+            "--format",
+            "json",
+        ]);
+    command.assert().success().stdout(
+        predicate::str::contains("\"task\": \"add wizard validation\"")
+            .and(predicate::str::contains("\"channel\": \"develop\""))
+            .and(predicate::str::contains(
+                "\"repo_id\": \"unknown/demo-repo\"",
+            ))
+            .and(predicate::str::contains("\"source\": \"local_overlay\""))
+            .and(predicate::str::contains("\"required_validations\"")),
+    );
+}
+
+#[test]
+fn agent_owner_json_returns_candidates() {
+    let temp_root = unique_temp_dir("gca-cli-agent-owner");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .arg("analyze");
+    analyze.assert().success();
+
+    let mut command = Command::cargo_bin("greentic-coding-agent").unwrap();
+    command
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "agent",
+            "owner",
+            "--concept",
+            "extension_pack",
+            "--format",
+            "json",
+        ]);
+    command.assert().success().stdout(
+        predicate::str::contains("\"concept\": \"extension_pack\"")
+            .and(predicate::str::contains("\"owner_candidates\""))
+            .and(predicate::str::contains("\"owner_repo\"")),
     );
 }
 
@@ -60,6 +137,62 @@ fn describe_here_json_returns_minimal_repo_metadata() {
             )))
             .and(predicate::str::contains("\"has_git_dir\": true")),
     );
+}
+
+#[test]
+fn compatibility_commands_remain_available() {
+    let temp_root = unique_temp_dir("gca-cli-compatibility");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["analyze", "--print", "--format", "json"]);
+    analyze
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"repo_name\": \"demo-repo\""));
+
+    let mut describe = Command::cargo_bin("greentic-coding-agent").unwrap();
+    describe
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["describe", "--here", "--format", "json"]);
+    describe
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"repo_name\": \"demo-repo\""));
+
+    let mut search = Command::cargo_bin("greentic-coding-agent").unwrap();
+    search
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "search",
+            "--mode",
+            "instruction",
+            "wizard",
+            "--format",
+            "json",
+        ]);
+    search
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"mode\": \"instruction\""));
+
+    let mut catalog_validate = Command::cargo_bin("greentic-coding-agent").unwrap();
+    catalog_validate
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["catalog", "validate", "--format", "json"]);
+    catalog_validate
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"ok\": true"));
 }
 
 #[test]
@@ -639,11 +772,23 @@ fn package_publish_list_and_sync_index_workflow() {
     package
         .current_dir(&repo_root)
         .env("HOME", &fake_home)
-        .args(["package-index", "--tag", "vtest", "--format", "json"]);
+        .args([
+            "package-index",
+            "--tag",
+            "vtest",
+            "--tag",
+            "sha-abc123",
+            "--format",
+            "json",
+        ]);
     package.assert().success().stdout(
-        predicate::str::contains(".greentic-agent/oci/unknown/demo-repo/vtest").and(
-            predicate::str::contains("ghcr.io/greenticai/indexes/unknown/demo-repo:vtest"),
-        ),
+        predicate::str::contains(".greentic-agent/oci/unknown/demo-repo/vtest")
+            .and(predicate::str::contains(
+                "ghcr.io/greenticai/indexes/unknown/demo-repo:vtest",
+            ))
+            .and(predicate::str::contains(
+                ".greentic-agent/oci/unknown/demo-repo/sha-abc123",
+            )),
     );
     assert!(
         repo_root
@@ -655,10 +800,20 @@ fn package_publish_list_and_sync_index_workflow() {
     publish
         .current_dir(&repo_root)
         .env("HOME", &fake_home)
-        .args(["publish-index", "--tag", "vtest", "--format", "json"]);
-    publish.assert().success().stdout(predicate::str::contains(
-        ".greentic-agent/remote-oci/unknown/demo-repo/vtest",
-    ));
+        .args([
+            "publish-index",
+            "--tag",
+            "vtest",
+            "--tag",
+            "sha-abc123",
+            "--format",
+            "json",
+        ]);
+    publish.assert().success().stdout(
+        predicate::str::contains(".greentic-agent/remote-oci/unknown/demo-repo/vtest").and(
+            predicate::str::contains(".greentic-agent/remote-oci/unknown/demo-repo/sha-abc123"),
+        ),
+    );
 
     let mut list = Command::cargo_bin("greentic-coding-agent").unwrap();
     list.current_dir(&repo_root).env("HOME", &fake_home).args([
@@ -668,7 +823,8 @@ fn package_publish_list_and_sync_index_workflow() {
     ]);
     list.assert().success().stdout(
         predicate::str::contains("\"repo_name\": \"demo-repo\"")
-            .and(predicate::str::contains("\"vtest\"")),
+            .and(predicate::str::contains("\"vtest\""))
+            .and(predicate::str::contains("\"sha-abc123\"")),
     );
 
     let mut sync = Command::cargo_bin("greentic-coding-agent").unwrap();
@@ -733,6 +889,178 @@ fn show_catalog_and_sync_without_repo_use_discovery_catalog() {
 }
 
 #[test]
+fn init_and_status_work_without_repo() {
+    let temp_root = unique_temp_dir("gca-cli-init-status");
+    let fake_home = temp_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut init = Command::cargo_bin("greentic-coding-agent").unwrap();
+    init.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "init",
+        "--channel",
+        "develop",
+        "--format",
+        "json",
+    ]);
+    init.assert().success().stdout(
+        predicate::str::contains("\"default_channel\": \"develop\"").and(predicate::str::contains(
+            "ghcr.io/greenticai/indexes/catalog:develop",
+        )),
+    );
+
+    let config = fs::read_to_string(fake_home.join(".greentic-agent").join("config.toml")).unwrap();
+    assert!(config.contains("default_channel = \"develop\""));
+    assert!(config.contains("public_catalog = \"ghcr.io/greenticai/indexes/catalog:develop\""));
+
+    let mut status = Command::cargo_bin("greentic-coding-agent").unwrap();
+    status
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args(["status", "--channel", "develop", "--format", "json"]);
+    status.assert().success().stdout(
+        predicate::str::contains("\"channel\": \"develop\"")
+            .and(predicate::str::contains("\"repos\": []")),
+    );
+}
+
+#[test]
+fn sync_channel_and_status_report_branch_cache() {
+    let temp_root = unique_temp_dir("gca-cli-channel-sync");
+    let fake_home = temp_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let repo_root = temp_root.join("channel-demo");
+    create_demo_repo(&repo_root);
+    write_origin(&repo_root, "https://github.com/org-a/channel-demo.git");
+    set_demo_branch(&repo_root, "develop", "def456");
+
+    let mut publish = Command::cargo_bin("greentic-coding-agent").unwrap();
+    publish
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["publish-index", "--tag", "develop", "--format", "json"]);
+    publish.assert().success();
+
+    let mut sync = Command::cargo_bin("greentic-coding-agent").unwrap();
+    sync.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "sync",
+        "--channel",
+        "develop",
+        "--format",
+        "json",
+    ]);
+    sync.assert()
+        .success()
+        .stdout(predicate::str::contains("\"channel\": \"develop\"").and(
+            predicate::str::contains(".greentic-agent/cache-oci/org-a/channel-demo/develop"),
+        ));
+
+    assert!(
+        fake_home
+            .join(".greentic-agent")
+            .join("indexes")
+            .join("public")
+            .join("org-a")
+            .join("channel-demo")
+            .join("develop")
+            .join("repo-index.json")
+            .exists()
+    );
+
+    let mut status = Command::cargo_bin("greentic-coding-agent").unwrap();
+    status
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args(["status", "--channel", "develop", "--format", "json"]);
+    status.assert().success().stdout(
+        predicate::str::contains("\"repo_id\": \"org-a/channel-demo\"")
+            .and(predicate::str::contains("\"branch\": \"develop\""))
+            .and(predicate::str::contains("\"commit_sha\": \"def456\""))
+            .and(predicate::str::contains("\"fresh\": true")),
+    );
+}
+
+#[test]
+fn watch_channel_writes_org_notification_feed_and_mark_seen() {
+    let temp_root = unique_temp_dir("gca-cli-watch-notifications");
+    let fake_home = temp_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let repo_root = temp_root.join("notify-demo");
+    create_demo_repo(&repo_root);
+    write_origin(&repo_root, "https://github.com/org-a/notify-demo.git");
+    set_demo_branch(&repo_root, "develop", "abc123");
+
+    let mut publish = Command::cargo_bin("greentic-coding-agent").unwrap();
+    publish
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["publish-index", "--tag", "develop", "--format", "json"]);
+    publish.assert().success();
+
+    let mut watch = Command::cargo_bin("greentic-coding-agent").unwrap();
+    watch.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "watch",
+        "--channel",
+        "develop",
+        "--poll",
+        "1s",
+        "--once",
+        "--format",
+        "json",
+    ]);
+    watch.assert().success().stdout(
+        predicate::str::contains("\"changed\": true")
+            .and(predicate::str::contains("\"notifications\""))
+            .and(predicate::str::contains("org-a/notify-demo/develop/abc123")),
+    );
+
+    let feed = fs::read_to_string(
+        fake_home
+            .join(".greentic-agent")
+            .join("notifications")
+            .join("feed.json"),
+    )
+    .unwrap();
+    assert!(feed.contains("\"schema_version\": \"gca.notifications.v1\""));
+    assert!(feed.contains("\"repo_id\": \"org-a/notify-demo\""));
+
+    let mut updates = Command::cargo_bin("greentic-coding-agent").unwrap();
+    updates
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args(["updates", "--scope", "org", "--new", "--format", "json"]);
+    updates.assert().success().stdout(
+        predicate::str::contains("\"repo_id\": \"org-a/notify-demo\"")
+            .and(predicate::str::contains("\"branch\": \"develop\"")),
+    );
+
+    let mut seen = Command::cargo_bin("greentic-coding-agent").unwrap();
+    seen.current_dir(&temp_root).env("HOME", &fake_home).args([
+        "updates",
+        "mark-seen",
+        "--scope",
+        "org",
+        "--all",
+        "--format",
+        "json",
+    ]);
+    seen.assert()
+        .success()
+        .stdout(predicate::str::contains("org-a/notify-demo/develop/abc123"));
+
+    let mut updates_after_seen = Command::cargo_bin("greentic-coding-agent").unwrap();
+    updates_after_seen
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args(["updates", "--scope", "org", "--new", "--format", "json"]);
+    updates_after_seen
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
+}
+
+#[test]
 fn sync_writes_state_and_merged_index_supports_cross_repo_search() {
     let temp_root = unique_temp_dir("gca-cli-merged-sync");
     let fake_home = temp_root.join("home");
@@ -776,6 +1104,7 @@ fn sync_writes_state_and_merged_index_supports_cross_repo_search() {
             .join("public")
             .join("org-a")
             .join("shared")
+            .join("main")
             .join("repo-index.json")
             .exists()
     );
@@ -856,6 +1185,8 @@ fn sync_writes_state_and_merged_index_supports_cross_repo_search() {
             .join("public")
             .join("org-b")
             .join("shared")
+            .join("main")
+            .join("repo-index.json")
             .exists()
     );
 }
@@ -999,6 +1330,109 @@ fn catalog_membership_commands_manage_editable_catalog() {
     remove.assert().success().stdout(
         predicate::str::contains("\"repos\": []")
             .and(predicate::str::contains("\"action\": \"remove_repo\"")),
+    );
+}
+
+#[test]
+fn catalog_rebuild_from_ghcr_writes_branch_aware_catalog_and_publishes_channel() {
+    let temp_root = unique_temp_dir("gca-cli-catalog-rebuild");
+    let fake_home = temp_root.join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let repo_root = temp_root.join("catalog-demo");
+    create_demo_repo(&repo_root);
+    write_origin(&repo_root, "https://github.com/greenticai/catalog-demo.git");
+
+    set_demo_branch(&repo_root, "main", "main123");
+    let mut analyze_main = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze_main
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["analyze", "--format", "json"]);
+    analyze_main.assert().success();
+    let mut publish_main = Command::cargo_bin("greentic-coding-agent").unwrap();
+    publish_main
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["publish-index", "--tag", "main", "--format", "json"]);
+    publish_main.assert().success();
+
+    set_demo_branch(&repo_root, "develop", "dev456");
+    let mut analyze_develop = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze_develop
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["analyze", "--format", "json"]);
+    analyze_develop.assert().success();
+    let mut publish_develop = Command::cargo_bin("greentic-coding-agent").unwrap();
+    publish_develop
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["publish-index", "--tag", "develop", "--format", "json"]);
+    publish_develop.assert().success();
+
+    let mut rebuild = Command::cargo_bin("greentic-coding-agent").unwrap();
+    rebuild
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args([
+            "catalog",
+            "rebuild-from-ghcr",
+            "--org",
+            "greenticai",
+            "--channel",
+            "develop",
+            "--format",
+            "json",
+        ]);
+    rebuild.assert().success().stdout(
+        predicate::str::contains("\"version\": \"gca.catalog.v2\"")
+            .and(predicate::str::contains("\"default_channel\": \"develop\""))
+            .and(predicate::str::contains(
+                "\"repo_id\": \"greenticai/catalog-demo\"",
+            ))
+            .and(predicate::str::contains("\"main\""))
+            .and(predicate::str::contains("\"develop\""))
+            .and(predicate::str::contains("\"commit_sha\": \"dev456\"")),
+    );
+
+    let catalog = fs::read_to_string(
+        fake_home
+            .join(".greentic-agent")
+            .join("catalogs")
+            .join("public")
+            .join("catalog.json"),
+    )
+    .unwrap();
+    assert!(catalog.contains("\"preferred_branch\": \"develop\""));
+
+    let mut publish_catalog = Command::cargo_bin("greentic-coding-agent").unwrap();
+    publish_catalog
+        .current_dir(&temp_root)
+        .env("HOME", &fake_home)
+        .args([
+            "catalog",
+            "publish",
+            "--channel",
+            "develop",
+            "--format",
+            "json",
+        ]);
+    publish_catalog
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            ".greentic-agent/remote-oci/catalogs/public/develop/catalog.json",
+        ));
+    assert!(
+        fake_home
+            .join(".greentic-agent")
+            .join("remote-oci")
+            .join("catalogs")
+            .join("public")
+            .join("develop")
+            .join("catalog.json")
+            .exists()
     );
 }
 
@@ -1198,6 +1632,8 @@ fn install_github_workflow_writes_expected_file() {
     .unwrap();
     assert!(workflow.contains("check-refresh"));
     assert!(workflow.contains("publish-index"));
+    assert!(workflow.contains("- develop"));
+    assert!(workflow.contains("sha-${{ github.sha }}"));
     assert!(workflow.contains("packages: write"));
     assert!(workflow.contains("oras-project/setup-oras"));
     assert!(workflow.contains("--backend ghcr"));
@@ -1261,7 +1697,9 @@ fn install_github_workflow_generates_tenant_and_catalog_variants() {
     )
     .unwrap();
     assert!(catalog_workflow.contains("catalog validate --tenant meeza"));
-    assert!(catalog_workflow.contains("catalog publish --tenant meeza --backend ghcr"));
+    assert!(catalog_workflow.contains(
+        "catalog publish --tenant meeza --channel \"${{ github.ref_name }}\" --backend ghcr"
+    ));
     assert!(catalog_workflow.contains("oras-project/setup-oras"));
     assert!(catalog_workflow.contains("packages: write"));
     assert!(catalog_workflow.lines().any(|line| line.trim() == "jobs:"));
@@ -1458,6 +1896,9 @@ fn serve_outputs_mcp_tool_surface() {
             .and(predicate::str::contains("\"name\": \"impact_analysis\""))
             .and(predicate::str::contains("\"name\": \"detect_changes\""))
             .and(predicate::str::contains("\"name\": \"search_all\""))
+            .and(predicate::str::contains("\"name\": \"gca.search\""))
+            .and(predicate::str::contains("\"name\": \"gca.agent_context\""))
+            .and(predicate::str::contains("\"name\": \"gca.branch_status\""))
             .and(predicate::str::contains("greentic://indexes/merged/status")),
     );
 }
@@ -1487,6 +1928,37 @@ fn serve_stdio_dispatches_mcp_requests() {
         predicate::str::contains("\"id\":\"stdio-1\"")
             .and(predicate::str::contains("\"ok\":true"))
             .and(predicate::str::contains("\"query\":\"wizard\"")),
+    );
+}
+
+#[test]
+fn serve_stdio_dispatches_gca_agent_context() {
+    let temp_root = unique_temp_dir("gca-cli-serve-stdio-gca-context");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .arg("analyze");
+    analyze.assert().success();
+
+    let mut serve = Command::cargo_bin("greentic-coding-agent").unwrap();
+    serve
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["serve", "--stdio"])
+        .write_stdin("{\"id\":\"ctx-1\",\"tool\":\"gca.agent_context\",\"arguments\":{\"task\":\"add wizard validation\"}}\n");
+    serve.assert().success().stdout(
+        predicate::str::contains("\"id\":\"ctx-1\"")
+            .and(predicate::str::contains("\"ok\":true"))
+            .and(predicate::str::contains(
+                "\"task\":\"add wizard validation\"",
+            ))
+            .and(predicate::str::contains("\"channel\":\"develop\"")),
     );
 }
 
@@ -1765,7 +2237,7 @@ fn unique_port_offset() -> u16 {
 
 fn http_request(port: u16, method: &str, path: &str, body: &str) -> String {
     let mut last_error = None;
-    for _ in 0..80 {
+    for _ in 0..240 {
         match TcpStream::connect(("127.0.0.1", port)) {
             Ok(mut stream) => {
                 let request = format!(
@@ -1779,7 +2251,7 @@ fn http_request(port: u16, method: &str, path: &str, body: &str) -> String {
             }
             Err(error) => {
                 last_error = Some(error);
-                thread::sleep(Duration::from_millis(25));
+                thread::sleep(Duration::from_millis(50));
             }
         }
     }
@@ -1940,6 +2412,23 @@ fn write_origin(repo_root: &Path, url: &str) {
     fs::write(
         repo_root.join(".git").join("config"),
         format!("[remote \"origin\"]\n\turl = {url}\n"),
+    )
+    .unwrap();
+}
+
+fn set_demo_branch(repo_root: &Path, branch: &str, commit: &str) {
+    fs::write(
+        repo_root.join(".git").join("HEAD"),
+        format!("ref: refs/heads/{branch}\n"),
+    )
+    .unwrap();
+    fs::write(
+        repo_root
+            .join(".git")
+            .join("refs")
+            .join("heads")
+            .join(branch),
+        format!("{commit}\n"),
     )
     .unwrap();
 }

@@ -4,6 +4,16 @@
   "repo_name": "greentic-coding-agent",
   "repo_role": "cli_launcher",
   "generated_at": "2026-04-15T00:00:00Z",
+  "metadata": {
+    "repo_id": "greenticai/greentic-coding-agent",
+    "branch": "main",
+    "commit_sha": "abc123",
+    "commit_time": null,
+    "indexed_at": "2026-04-15T00:00:00Z",
+    "index_schema_version": "gca.repo_index.v1",
+    "tool_version": "0.1.2",
+    "source_tree_hash": "fnv64:0000000000000001"
+  },
   "freshness": "fresh",
   "manifest": {
     "version": "v1",

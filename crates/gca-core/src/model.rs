@@ -99,6 +99,8 @@ pub struct RepoIndex {
     pub repo_name: String,
     pub repo_role: RepoRole,
     pub generated_at: String,
+    #[serde(default)]
+    pub metadata: Option<RepoIndexMetadata>,
     pub freshness: FreshnessStatus,
     pub manifest: RepoAgentManifest,
     pub concept_graph: Vec<ConceptDescriptor>,
@@ -122,6 +124,22 @@ impl RepoIndex {
         self.manifest.validate()?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoIndexMetadata {
+    pub repo_id: String,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    #[serde(default)]
+    pub commit_time: Option<String>,
+    pub indexed_at: String,
+    pub index_schema_version: String,
+    pub tool_version: String,
+    #[serde(default)]
+    pub source_tree_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -538,10 +556,20 @@ pub struct CatalogRepo {
     pub repo_id: String,
     #[serde(default)]
     pub repo_name: String,
+    #[serde(alias = "role", default = "default_repo_role")]
     pub repo_role: RepoRole,
+    #[serde(default = "default_latest_tag")]
     pub latest_tag: String,
+    #[serde(default)]
     pub package_ref: String,
+    #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub default_branch: Option<String>,
+    #[serde(default)]
+    pub preferred_branch: Option<String>,
+    #[serde(default)]
+    pub branches: BTreeMap<String, CatalogBranchEntry>,
     #[serde(default)]
     pub visibility: IndexVisibility,
     #[serde(default)]
@@ -554,6 +582,81 @@ pub struct CatalogRepo {
     pub source_commit: Option<String>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogBranchEntry {
+    pub index_uri: String,
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub digest: Option<String>,
+}
+
+impl CatalogRepo {
+    pub fn validate(&self) -> Result<(), String> {
+        RepoId::parse(&self.repo_id)
+            .map_err(|error| format!("catalog repo_id `{}` is invalid: {error}", self.repo_id))?;
+
+        for branch in self
+            .default_branch
+            .iter()
+            .chain(self.preferred_branch.iter())
+            .chain(self.branches.keys())
+        {
+            if !is_valid_branch_name(branch) {
+                return Err(format!("catalog branch `{branch}` is invalid"));
+            }
+        }
+
+        for (branch, entry) in &self.branches {
+            if entry.index_uri.is_empty() {
+                return Err(format!(
+                    "catalog branch `{branch}` index_uri must not be empty"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn selected_branch(&self, channel: Option<&str>) -> Option<(String, CatalogBranchEntry)> {
+        let branch = channel
+            .or(self.preferred_branch.as_deref())
+            .or(self.default_branch.as_deref());
+
+        if let Some(branch) = branch
+            && let Some(entry) = self.branches.get(branch)
+        {
+            return Some((branch.to_string(), entry.clone()));
+        }
+
+        if let Some(default_branch) = self.default_branch.as_deref()
+            && let Some(entry) = self.branches.get(default_branch)
+        {
+            return Some((default_branch.to_string(), entry.clone()));
+        }
+
+        if let Some((branch, entry)) = self.branches.iter().next() {
+            return Some((branch.clone(), entry.clone()));
+        }
+
+        if !self.package_ref.is_empty() {
+            return Some((
+                self.latest_tag.clone(),
+                CatalogBranchEntry {
+                    index_uri: self.package_ref.clone(),
+                    commit_sha: self.source_commit.clone(),
+                    updated_at: Some(self.updated_at.clone()).filter(|value| !value.is_empty()),
+                    digest: self.digest.clone(),
+                },
+            ));
+        }
+
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -574,8 +677,13 @@ pub enum AuthKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
+    #[serde(alias = "schema_version")]
     pub version: String,
     pub generated_at: String,
+    #[serde(default)]
+    pub catalog_id: Option<String>,
+    #[serde(default)]
+    pub default_channel: Option<String>,
     pub repos: Vec<CatalogRepo>,
     #[serde(default)]
     pub change_log: Vec<CatalogChange>,
@@ -586,8 +694,20 @@ impl Catalog {
         if self.version.is_empty() {
             return Err("catalog version must not be empty".to_string());
         }
+        for repo in &self.repos {
+            repo.validate()?;
+        }
         Ok(())
     }
+}
+
+fn is_valid_branch_name(branch: &str) -> bool {
+    !branch.is_empty()
+        && !branch.contains(char::is_whitespace)
+        && !branch.contains("..")
+        && !branch.starts_with('/')
+        && !branch.ends_with('/')
+        && !branch.ends_with(".lock")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -612,6 +732,14 @@ pub enum CatalogAction {
 
 fn default_repo_id() -> String {
     "unknown/unknown-repo".to_string()
+}
+
+fn default_repo_role() -> RepoRole {
+    RepoRole::DemoApp
+}
+
+fn default_latest_tag() -> String {
+    "latest".to_string()
 }
 
 fn default_enabled() -> bool {
@@ -646,6 +774,7 @@ mod tests {
         FreshnessStatus, KnowledgeScope, LifecyclePhase, RepoRole, ReuseDescriptor,
         ValidationDescriptor, WorkflowDescriptor,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn builtin_concept_ids_cover_required_seed_values() {
@@ -679,6 +808,7 @@ mod tests {
             repo_name: manifest.repo_name.clone(),
             repo_role: manifest.repo_role,
             generated_at: "2026-04-15T00:00:00Z".to_string(),
+            metadata: None,
             freshness: FreshnessStatus::Fresh,
             manifest: manifest.clone(),
             concept_graph: vec![ConceptDescriptor {
@@ -824,6 +954,8 @@ mod tests {
         let catalog = Catalog {
             version: SCHEMA_VERSION_V1.to_string(),
             generated_at: "2026-04-15T00:00:00Z".to_string(),
+            catalog_id: None,
+            default_channel: None,
             repos: vec![super::CatalogRepo {
                 repo_id: "greenticai/greentic-coding-agent".to_string(),
                 repo_name: "greentic-coding-agent".to_string(),
@@ -831,6 +963,9 @@ mod tests {
                 latest_tag: "v0.1.0".to_string(),
                 package_ref: "ghcr.io/greenticai/indexes/greentic-coding-agent:v0.1.0".to_string(),
                 updated_at: "2026-04-15T00:00:00Z".to_string(),
+                default_branch: None,
+                preferred_branch: None,
+                branches: BTreeMap::new(),
                 visibility: super::IndexVisibility::Public,
                 tenant: None,
                 required_auth: None,
@@ -864,6 +999,127 @@ mod tests {
             serde_json::from_str::<Catalog>(&catalog_json).unwrap(),
             catalog
         );
+    }
+
+    #[test]
+    fn catalog_v2_branch_entries_select_requested_or_default_channel() {
+        let catalog = serde_json::from_str::<Catalog>(
+            r#"{
+              "schema_version": "gca.catalog.v2",
+              "catalog_id": "greenticai/public",
+              "default_channel": "develop",
+              "generated_at": "2026-04-27T00:00:00Z",
+              "repos": [{
+                "repo_id": "greenticai/greentic-coding-agent",
+                "repo_name": "greentic-coding-agent",
+                "role": "pack_authoring",
+                "default_branch": "main",
+                "preferred_branch": "develop",
+                "branches": {
+                  "main": {
+                    "index_uri": "ghcr.io/greenticai/indexes/greentic-coding-agent:main",
+                    "commit_sha": "abc123",
+                    "updated_at": "2026-04-27T00:00:00Z"
+                  },
+                  "develop": {
+                    "index_uri": "ghcr.io/greenticai/indexes/greentic-coding-agent:develop",
+                    "commit_sha": "def456",
+                    "updated_at": "2026-04-27T00:00:00Z",
+                    "digest": "sha256:1234"
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(catalog.version, "gca.catalog.v2");
+        assert_eq!(catalog.default_channel.as_deref(), Some("develop"));
+        let repo = catalog.repos.first().unwrap();
+        assert_eq!(repo.repo_role, RepoRole::PackAuthoring);
+        assert_eq!(repo.latest_tag, "latest");
+
+        let (branch, entry) = repo.selected_branch(Some("main")).unwrap();
+        assert_eq!(branch, "main");
+        assert_eq!(
+            entry.index_uri,
+            "ghcr.io/greenticai/indexes/greentic-coding-agent:main"
+        );
+
+        let (branch, entry) = repo.selected_branch(None).unwrap();
+        assert_eq!(branch, "develop");
+        assert_eq!(entry.commit_sha.as_deref(), Some("def456"));
+    }
+
+    #[test]
+    fn legacy_catalog_entries_remain_selectable_without_branch_map() {
+        let catalog = serde_json::from_str::<Catalog>(
+            r#"{
+              "version": "v1",
+              "generated_at": "2026-04-27T00:00:00Z",
+              "repos": [{
+                "repo_id": "greenticai/greentic-coding-agent",
+                "repo_name": "greentic-coding-agent",
+                "repo_role": "cli_launcher",
+                "latest_tag": "v0.1.2",
+                "package_ref": "ghcr.io/greenticai/indexes/greentic-coding-agent:v0.1.2",
+                "updated_at": "2026-04-27T00:00:00Z",
+                "source_commit": "abc123"
+              }]
+            }"#,
+        )
+        .unwrap();
+
+        let repo = catalog.repos.first().unwrap();
+        let (branch, entry) = repo.selected_branch(None).unwrap();
+        assert_eq!(branch, "v0.1.2");
+        assert_eq!(
+            entry.index_uri,
+            "ghcr.io/greenticai/indexes/greentic-coding-agent:v0.1.2"
+        );
+        assert_eq!(entry.commit_sha.as_deref(), Some("abc123"));
+        assert_eq!(entry.updated_at.as_deref(), Some("2026-04-27T00:00:00Z"));
+    }
+
+    #[test]
+    fn catalog_validation_rejects_bad_repo_id_and_branch_names() {
+        let bad_repo_id = serde_json::from_str::<Catalog>(
+            r#"{
+              "version": "gca.catalog.v2",
+              "generated_at": "2026-04-27T00:00:00Z",
+              "repos": [{
+                "repo_id": "not-a-repo-id",
+                "repo_name": "bad",
+                "repo_role": "cli_launcher",
+                "branches": {
+                  "main": {
+                    "index_uri": "ghcr.io/greenticai/indexes/bad:main"
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+        assert!(bad_repo_id.validate().unwrap_err().contains("repo_id"));
+
+        let bad_branch = serde_json::from_str::<Catalog>(
+            r#"{
+              "version": "gca.catalog.v2",
+              "generated_at": "2026-04-27T00:00:00Z",
+              "repos": [{
+                "repo_id": "greenticai/bad",
+                "repo_name": "bad",
+                "repo_role": "cli_launcher",
+                "branches": {
+                  "feature branch": {
+                    "index_uri": "ghcr.io/greenticai/indexes/bad:feature-branch"
+                  }
+                }
+              }]
+            }"#,
+        )
+        .unwrap();
+        assert!(bad_branch.validate().unwrap_err().contains("branch"));
     }
 
     #[test]

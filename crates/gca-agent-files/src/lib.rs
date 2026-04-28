@@ -445,6 +445,7 @@ mod tests {
             repo_name: manifest.repo_name.clone(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "unix:1".to_string(),
+            metadata: None,
             freshness: FreshnessStatus::Fresh,
             manifest,
             concept_graph: vec![ConceptDescriptor {

@@ -19,7 +19,7 @@ fn engine_generates_files_packages_index_and_checks_refresh() {
         .unwrap();
     let package = service
         .package_index(PackageIndexOptions {
-            tag: "test".to_string(),
+            tags: vec!["test".to_string(), "sha-abc123".to_string()],
         })
         .unwrap();
     let refresh = service.check_refresh(CheckRefreshOptions).unwrap();
@@ -27,6 +27,7 @@ fn engine_generates_files_packages_index_and_checks_refresh() {
     assert_eq!(generated.generated_files.len(), 4);
     assert!(generated.written_paths.iter().all(|path| path.exists()));
     assert!(package.package.package_dir.exists());
+    assert_eq!(package.packages.len(), 2);
     assert!(
         refresh
             .reasons
@@ -44,12 +45,12 @@ fn engine_syncs_package_and_rebuilds_merged_index() {
     let repo_id = analyzed.repo_index.repo_id;
     service
         .package_index(PackageIndexOptions {
-            tag: "latest".to_string(),
+            tags: vec!["latest".to_string()],
         })
         .unwrap();
     service
         .publish_index(PublishIndexOptions {
-            tag: "latest".to_string(),
+            tags: vec!["latest".to_string()],
             remote_root: None,
         })
         .unwrap();
@@ -57,6 +58,7 @@ fn engine_syncs_package_and_rebuilds_merged_index() {
         .sync(SyncOptions {
             repo_id: None,
             tag: None,
+            channel: None,
             remote_root: None,
         })
         .unwrap();
@@ -64,6 +66,7 @@ fn engine_syncs_package_and_rebuilds_merged_index() {
         .sync(SyncOptions {
             repo_id: None,
             tag: None,
+            channel: None,
             remote_root: None,
         })
         .unwrap();
@@ -106,6 +109,7 @@ fn engine_syncs_package_and_rebuilds_merged_index() {
             .join("indexes")
             .join("public")
             .join(&repo_id)
+            .join("latest")
             .join("repo-index.json")
             .exists()
     );
@@ -115,6 +119,7 @@ fn engine_syncs_package_and_rebuilds_merged_index() {
             .join("indexes")
             .join("public")
             .join(&repo_id)
+            .join("latest")
             .join("tantivy")
             .exists()
     );

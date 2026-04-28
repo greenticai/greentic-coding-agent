@@ -13,12 +13,12 @@ pub use headings::{
 };
 pub use model::{
     AgentKnowledgeState, AuthKind, BUILTIN_CONCEPT_IDS, CapabilityAnnouncement, Catalog,
-    CatalogAction, CatalogChange, CatalogRepo, ConceptDescriptor, DeprecatedCommandDescriptor,
-    IndexVisibility, InstructionDescriptor, KnowledgeUpdateDescriptor, KnowledgeUpdateSeverity,
-    KnowledgeUpdateType, MigrationStepDescriptor, ReplacedGuidanceDescriptor, RepoAgentManifest,
-    RepoId, RepoIndex, ReuseDescriptor, RustSymbolDescriptor, RustSymbolKind, SCHEMA_VERSION_V1,
-    SeenKnowledgeUpdate, SourceStats, TrainingAudience, TrainingCourseDescriptor,
-    TrainingModuleDescriptor, TrainingStepDescriptor, ValidationDescriptor, WorkflowDescriptor,
-    builtin_concepts,
+    CatalogAction, CatalogBranchEntry, CatalogChange, CatalogRepo, ConceptDescriptor,
+    DeprecatedCommandDescriptor, IndexVisibility, InstructionDescriptor, KnowledgeUpdateDescriptor,
+    KnowledgeUpdateSeverity, KnowledgeUpdateType, MigrationStepDescriptor,
+    ReplacedGuidanceDescriptor, RepoAgentManifest, RepoId, RepoIndex, RepoIndexMetadata,
+    ReuseDescriptor, RustSymbolDescriptor, RustSymbolKind, SCHEMA_VERSION_V1, SeenKnowledgeUpdate,
+    SourceStats, TrainingAudience, TrainingCourseDescriptor, TrainingModuleDescriptor,
+    TrainingStepDescriptor, ValidationDescriptor, WorkflowDescriptor, builtin_concepts,
 };
 pub use registry::{Registry, RegistryEntry, RegistryError, load_registry, write_registry};

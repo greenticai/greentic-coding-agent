@@ -311,12 +311,23 @@ impl CodingAgentService {
         let repo_root = self.repo_root();
         let repo_index = self.ensure_repo_index()?;
         let output_root = repo_root.join(LOCAL_INDEX_DIR).join("oci");
-        let package = gca_oci::package_index(&repo_root, &repo_index, &options.tag, &output_root)
-            .map_err(|source| EngineError::Io {
-            path: output_root.display().to_string(),
-            source,
-        })?;
-        Ok(PackageIndexResponse { package })
+        let tags = normalized_tags(options.tags);
+        let mut packages = Vec::new();
+        for tag in tags {
+            packages.push(
+                gca_oci::package_index(&repo_root, &repo_index, &tag, &output_root).map_err(
+                    |source| EngineError::Io {
+                        path: output_root.display().to_string(),
+                        source,
+                    },
+                )?,
+            );
+        }
+        let package = packages
+            .first()
+            .cloned()
+            .expect("normalized tags should produce at least one package");
+        Ok(PackageIndexResponse { package, packages })
     }
 
     pub fn publish_index(
@@ -327,32 +338,45 @@ impl CodingAgentService {
         let remote_root = options
             .remote_root
             .unwrap_or_else(|| self.default_remote_root());
-        let package_dir = self
-            .repo_root()
-            .join(LOCAL_INDEX_DIR)
-            .join("oci")
-            .join(&repo_index.repo_id)
-            .join(&options.tag);
-        if !package_dir
-            .join("artifacts")
-            .join("repo-index.json")
-            .exists()
-        {
-            self.package_index(PackageIndexOptions {
-                tag: options.tag.clone(),
-            })?;
+        let tags = normalized_tags(options.tags);
+        let mut published_paths = Vec::new();
+        for tag in tags {
+            let package_dir = self
+                .repo_root()
+                .join(LOCAL_INDEX_DIR)
+                .join("oci")
+                .join(&repo_index.repo_id)
+                .join(&tag);
+            if !package_dir
+                .join("artifacts")
+                .join("repo-index.json")
+                .exists()
+            {
+                self.package_index(PackageIndexOptions {
+                    tags: vec![tag.clone()],
+                })?;
+            }
+            published_paths.push(
+                gca_oci::publish_local_package(
+                    &package_dir,
+                    &remote_root,
+                    &repo_index.repo_id,
+                    &tag,
+                )
+                .map_err(|source| EngineError::Io {
+                    path: remote_root.display().to_string(),
+                    source,
+                })?,
+            );
         }
-        let published_path = gca_oci::publish_local_package(
-            &package_dir,
-            &remote_root,
-            &repo_index.repo_id,
-            &options.tag,
-        )
-        .map_err(|source| EngineError::Io {
-            path: remote_root.display().to_string(),
-            source,
-        })?;
-        Ok(PublishIndexResponse { published_path })
+        let published_path = published_paths
+            .first()
+            .cloned()
+            .expect("normalized tags should produce at least one publish path");
+        Ok(PublishIndexResponse {
+            published_path,
+            published_paths,
+        })
     }
 
     pub fn sync(&self, options: SyncOptions) -> Result<SyncResponse, EngineError> {
@@ -368,7 +392,11 @@ impl CodingAgentService {
                 &indexes_root,
                 &self.home_dir,
                 &repo_id,
-                options.tag.as_deref().unwrap_or("latest"),
+                options
+                    .tag
+                    .as_deref()
+                    .or(options.channel.as_deref())
+                    .unwrap_or("latest"),
                 None,
             )
             .map_err(EngineError::Sync)?
@@ -378,7 +406,10 @@ impl CodingAgentService {
                 &cache_root,
                 &indexes_root,
                 &self.home_dir,
-                &gca_oci::SyncCatalogOptions::default(),
+                &gca_oci::SyncCatalogOptions {
+                    channel: options.channel,
+                    ..Default::default()
+                },
             )
             .map_err(EngineError::Sync)?
         };
@@ -764,4 +795,22 @@ fn plan_update_issues(
     issues.sort();
     issues.dedup();
     issues
+}
+
+fn normalized_tags(tags: Vec<String>) -> Vec<String> {
+    let mut tags = if tags.is_empty() {
+        vec!["latest".to_string()]
+    } else {
+        tags
+    };
+    tags.retain(|tag| !tag.trim().is_empty());
+    for tag in &mut tags {
+        *tag = tag.trim().to_string();
+    }
+    tags.sort();
+    tags.dedup();
+    if tags.is_empty() {
+        tags.push("latest".to_string());
+    }
+    tags
 }

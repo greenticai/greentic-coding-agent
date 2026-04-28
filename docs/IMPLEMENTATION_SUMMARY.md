@@ -12,7 +12,8 @@ Global cache
   ├─ public catalog
   ├─ tenant catalogs
   ├─ downloaded repo indexes
-  └─ merged Tantivy index
+  ├─ merged Tantivy index
+  └─ notifications/feed.json
 
 Server
   ├─ MCP stdio
@@ -67,3 +68,17 @@ greentic-coding-agent serve --http --host 127.0.0.1 --port 7757 --watch
 ```
 
 The server keeps the merged index updated automatically.
+
+For a foreground cache refresher without starting the MCP or HTTP server:
+
+```bash
+greentic-coding-agent watch --channel develop --poll 10m
+greentic-coding-agent daemon --channel develop --poll 10m
+```
+
+Org-level notification items are read with:
+
+```bash
+greentic-coding-agent updates --new --scope org --format json
+greentic-coding-agent updates mark-seen --scope org --all
+```
