@@ -22,7 +22,19 @@ pub struct PackageMetadata {
     pub repo_name: String,
     pub tag: String,
     pub reference: String,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub commit_sha: Option<String>,
     pub generated_at: String,
+    #[serde(default)]
+    pub indexed_at: Option<String>,
+    #[serde(default)]
+    pub index_schema_version: Option<String>,
+    #[serde(default)]
+    pub tool_version: Option<String>,
+    #[serde(default)]
+    pub source_tree_hash: Option<String>,
     pub compatibility: String,
     pub files: Vec<String>,
 }
@@ -65,11 +77,17 @@ pub struct SyncState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncedRepoState {
     pub repo_id: String,
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
     pub tenant: Option<String>,
     pub visibility: IndexVisibility,
     pub package_ref: String,
     pub digest: Option<String>,
     pub source_commit: Option<String>,
+    #[serde(default)]
+    pub indexed_at: Option<String>,
     pub downloaded_at: String,
     pub local_index_path: PathBuf,
     pub local_tantivy_path: Option<PathBuf>,
@@ -77,6 +95,8 @@ pub struct SyncedRepoState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncReport {
+    #[serde(default)]
+    pub channel: Option<String>,
     pub public_catalog: Option<String>,
     pub tenant_catalog: Option<String>,
     pub downloaded: Vec<PathBuf>,
@@ -106,6 +126,7 @@ pub struct MergedIndexReport {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SyncCatalogOptions {
+    pub channel: Option<String>,
     pub tenant: Option<String>,
     pub public_only: bool,
     pub private_only: bool,
@@ -293,6 +314,8 @@ pub fn merge_catalogs(public_catalog: Catalog, tenant_catalog: Option<Catalog>) 
     Catalog {
         version: public_catalog.version,
         generated_at,
+        catalog_id: public_catalog.catalog_id,
+        default_channel: public_catalog.default_channel,
         repos: repos.into_values().collect(),
         change_log,
     }
@@ -374,7 +397,31 @@ pub fn package_index(
         repo_name: repo_index.repo_name.clone(),
         tag: tag.to_string(),
         reference: reference.clone(),
+        branch: repo_index
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.branch.clone()),
+        commit_sha: repo_index
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.commit_sha.clone()),
         generated_at: repo_index.generated_at.clone(),
+        indexed_at: repo_index
+            .metadata
+            .as_ref()
+            .map(|metadata| metadata.indexed_at.clone()),
+        index_schema_version: repo_index
+            .metadata
+            .as_ref()
+            .map(|metadata| metadata.index_schema_version.clone()),
+        tool_version: repo_index
+            .metadata
+            .as_ref()
+            .map(|metadata| metadata.tool_version.clone()),
+        source_tree_hash: repo_index
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.source_tree_hash.clone()),
         compatibility: repo_index.version.clone(),
         files: files.clone(),
     };
@@ -470,28 +517,77 @@ pub fn build_catalog(remote_root: &Path) -> std::io::Result<Catalog> {
         let Some(latest_tag) = repo.tags.last().cloned() else {
             continue;
         };
-        let repo_index = load_repo_index(
-            &remote_root
-                .join(&repo.repo_id)
-                .join(&latest_tag)
-                .join("artifacts")
-                .join("repo-index.json"),
-        )?;
+        let mut branches = BTreeMap::new();
+        let mut latest_repo_index = None;
+        for tag in &repo.tags {
+            let repo_index = load_repo_index(
+                &remote_root
+                    .join(&repo.repo_id)
+                    .join(tag)
+                    .join("artifacts")
+                    .join("repo-index.json"),
+            )?;
+            let branch = if tag.starts_with("sha-") {
+                tag.clone()
+            } else {
+                repo_index
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.branch.clone())
+                    .unwrap_or_else(|| tag.clone())
+            };
+            let package_ref = format!("ghcr.io/greenticai/indexes/{}:{}", repo_index.repo_id, tag);
+            branches.insert(
+                branch,
+                gca_core::CatalogBranchEntry {
+                    index_uri: package_ref,
+                    commit_sha: repo_index
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.commit_sha.clone()),
+                    updated_at: Some(repo_index.generated_at.clone()),
+                    digest: file_digest_hex(
+                        &remote_root
+                            .join(&repo.repo_id)
+                            .join(tag)
+                            .join("artifacts")
+                            .join("repo-index.json"),
+                    )
+                    .ok(),
+                },
+            );
+            if tag == &latest_tag {
+                latest_repo_index = Some(repo_index);
+            }
+        }
+        let repo_index = latest_repo_index.expect("latest tag should have been loaded");
+        let branch = repo_index
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.branch.clone())
+            .unwrap_or_else(|| latest_tag.clone());
+        let package_ref = format!(
+            "ghcr.io/greenticai/indexes/{}:{}",
+            repo_index.repo_id, latest_tag
+        );
         catalog_repos.push(CatalogRepo {
             repo_id: repo.repo_id,
             repo_name: repo.repo_name,
             repo_role: repo_index.repo_role,
             latest_tag: latest_tag.clone(),
-            package_ref: format!(
-                "ghcr.io/greenticai/indexes/{}:{}",
-                repo_index.repo_id, latest_tag
-            ),
-            updated_at: repo_index.generated_at,
+            package_ref,
+            updated_at: repo_index.generated_at.clone(),
+            default_branch: Some(branch.clone()),
+            preferred_branch: Some(branch),
+            branches,
             visibility: gca_core::IndexVisibility::Public,
             tenant: None,
             required_auth: None,
             digest: None,
-            source_commit: None,
+            source_commit: repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.commit_sha.clone()),
             enabled: true,
         });
     }
@@ -500,6 +596,8 @@ pub fn build_catalog(remote_root: &Path) -> std::io::Result<Catalog> {
     Ok(Catalog {
         version: SCHEMA_VERSION_V1.to_string(),
         generated_at: timestamp_string(),
+        catalog_id: Some("greenticai/public".to_string()),
+        default_channel: Some("latest".to_string()),
         repos: catalog_repos,
         change_log: Vec::new(),
     })
@@ -538,7 +636,14 @@ pub fn sync_catalog_with_state(
     };
     let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
     let mut report = SyncReport {
-        public_catalog: Some(DEFAULT_PUBLIC_CATALOG_REF.to_string()),
+        channel: options.channel.clone(),
+        public_catalog: Some(
+            options
+                .channel
+                .as_deref()
+                .map(|channel| format!("ghcr.io/greenticai/indexes/catalog:{channel}"))
+                .unwrap_or_else(|| DEFAULT_PUBLIC_CATALOG_REF.to_string()),
+        ),
         tenant_catalog: options.tenant.as_deref().map(default_tenant_catalog_ref),
         downloaded: Vec::new(),
         skipped: Vec::new(),
@@ -558,17 +663,38 @@ pub fn sync_catalog_with_state(
             continue;
         }
 
-        let source = repo_id_path(remote_root, &repo.repo_id).join(&repo.latest_tag);
-        let target = repo_id_path(cache_root, &repo.repo_id).join(&repo.latest_tag);
-        let digest = repo
+        let Some((branch, branch_entry)) = repo.selected_branch(options.channel.as_deref()) else {
+            report.skipped.push(repo.repo_id.clone());
+            continue;
+        };
+        let tag =
+            tag_from_index_uri(&branch_entry.index_uri).unwrap_or_else(|| repo.latest_tag.clone());
+        let mut selected_repo = repo.clone();
+        selected_repo.latest_tag = tag.clone();
+        selected_repo.package_ref = branch_entry.index_uri.clone();
+        selected_repo.preferred_branch = Some(branch.clone());
+        selected_repo.source_commit = branch_entry
+            .commit_sha
+            .clone()
+            .or_else(|| repo.source_commit.clone());
+        selected_repo.digest = branch_entry.digest.clone().or_else(|| repo.digest.clone());
+        selected_repo.updated_at = branch_entry
+            .updated_at
+            .clone()
+            .unwrap_or_else(|| repo.updated_at.clone());
+
+        let source = repo_id_path(remote_root, &repo.repo_id).join(&tag);
+        let target = repo_id_path(cache_root, &repo.repo_id).join(&tag);
+        let digest = selected_repo
             .digest
             .clone()
             .or_else(|| file_digest_hex(&source.join("artifacts").join("repo-index.json")).ok());
         let unchanged = state.repos.iter().any(|entry| {
             entry.repo_id == repo.repo_id
+                && entry.branch.as_deref() == Some(branch.as_str())
                 && entry.tenant == repo.tenant
                 && entry.digest == digest
-                && entry.source_commit == repo.source_commit
+                && entry.source_commit == selected_repo.source_commit
                 && entry.local_index_path.join("repo-index.json").exists()
         });
         if unchanged {
@@ -583,7 +709,13 @@ pub fn sync_catalog_with_state(
             });
             continue;
         }
-        match sync_cached_index_from_package(repo, &source, indexes_root, digest) {
+        match sync_cached_index_from_package(
+            &selected_repo,
+            &source,
+            indexes_root,
+            digest,
+            options.channel.clone(),
+        ) {
             Ok(entry) => {
                 upsert_synced_repo(&mut state, entry);
                 report.downloaded.push(target);
@@ -612,8 +744,13 @@ pub fn sync_repo_with_state(
     let target = repo_id_path(cache_root, repo_id).join(tag);
     let repo = catalog_repo_from_package(&source, repo_id, tag, tenant)?;
     let digest = repo.digest.clone();
+    let branch = repo
+        .selected_branch(None)
+        .map(|(branch, _)| branch)
+        .unwrap_or_else(|| tag.to_string());
     let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
     let mut report = SyncReport {
+        channel: Some(branch.clone()),
         public_catalog: None,
         tenant_catalog: tenant.map(default_tenant_catalog_ref),
         downloaded: Vec::new(),
@@ -624,6 +761,7 @@ pub fn sync_repo_with_state(
 
     let unchanged = state.repos.iter().any(|entry| {
         entry.repo_id == repo.repo_id
+            && entry.branch.as_deref() == Some(branch.as_str())
             && entry.tenant == repo.tenant
             && entry.digest == digest
             && entry.source_commit == repo.source_commit
@@ -635,7 +773,7 @@ pub fn sync_repo_with_state(
     }
 
     copy_dir_all(&source, &target).map_err(|error| error.to_string())?;
-    let entry = sync_cached_index_from_package(&repo, &source, indexes_root, digest)?;
+    let entry = sync_cached_index_from_package(&repo, &source, indexes_root, digest, Some(branch))?;
     upsert_synced_repo(&mut state, entry);
     write_sync_state(home, &state)?;
     report.downloaded.push(target);
@@ -643,14 +781,20 @@ pub fn sync_repo_with_state(
 }
 
 pub fn local_index_path_for(indexes_root: &Path, repo: &CatalogRepo) -> PathBuf {
+    let branch = repo
+        .selected_branch(None)
+        .map(|(branch, _)| branch)
+        .unwrap_or_else(|| repo.latest_tag.clone());
     match repo.visibility {
         IndexVisibility::Tenant | IndexVisibility::Private => indexes_root
             .join("tenants")
             .join(repo.tenant.as_deref().unwrap_or("default"))
-            .join(repo_id_path(Path::new(""), &repo.repo_id)),
+            .join(repo_id_path(Path::new(""), &repo.repo_id))
+            .join(branch),
         IndexVisibility::Public => indexes_root
             .join("public")
-            .join(repo_id_path(Path::new(""), &repo.repo_id)),
+            .join(repo_id_path(Path::new(""), &repo.repo_id))
+            .join(branch),
     }
 }
 
@@ -679,6 +823,8 @@ pub fn write_sync_state(home: &Path, state: &SyncState) -> Result<(), String> {
         left.repo_id
             .cmp(&right.repo_id)
             .then(left.tenant.cmp(&right.tenant))
+            .then(left.branch.cmp(&right.branch))
+            .then(left.channel.cmp(&right.channel))
     });
     let raw = serde_json::to_string_pretty(&state).expect("sync state should serialize as json");
     fs::write(&path, format!("{raw}\n"))
@@ -708,7 +854,12 @@ pub fn load_cached_repo_indexes(
             state: entry,
         });
     }
-    cached.sort_by(|left, right| left.state.repo_id.cmp(&right.state.repo_id));
+    cached.sort_by(|left, right| {
+        left.state
+            .repo_id
+            .cmp(&right.state.repo_id)
+            .then(left.state.branch.cmp(&right.state.branch))
+    });
     Ok(cached)
 }
 
@@ -837,13 +988,36 @@ fn catalog_repo_from_package(
 ) -> Result<CatalogRepo, String> {
     let repo_index = load_repo_index(&package_dir.join("artifacts").join("repo-index.json"))
         .map_err(|error| error.to_string())?;
+    let branch = repo_index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.branch.clone())
+        .unwrap_or_else(|| tag.to_string());
+    let package_ref = format!("ghcr.io/greenticai/indexes/{requested_repo}:{tag}");
+    let digest = file_digest_hex(&package_dir.join("artifacts").join("repo-index.json")).ok();
+    let mut branches = BTreeMap::new();
+    branches.insert(
+        branch.clone(),
+        gca_core::CatalogBranchEntry {
+            index_uri: package_ref.clone(),
+            commit_sha: repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.commit_sha.clone()),
+            updated_at: Some(repo_index.generated_at.clone()),
+            digest: digest.clone(),
+        },
+    );
     Ok(CatalogRepo {
         repo_id: repo_index.repo_id.clone(),
         repo_name: repo_index.repo_name.clone(),
         repo_role: repo_index.repo_role,
         latest_tag: tag.to_string(),
-        package_ref: format!("ghcr.io/greenticai/indexes/{requested_repo}:{tag}"),
+        package_ref,
         updated_at: repo_index.generated_at.clone(),
+        default_branch: Some(branch.clone()),
+        preferred_branch: Some(branch),
+        branches,
         visibility: if tenant.is_some() {
             IndexVisibility::Tenant
         } else {
@@ -851,10 +1025,17 @@ fn catalog_repo_from_package(
         },
         tenant: tenant.map(ToString::to_string),
         required_auth: tenant.map(|_| AuthKind::GhcrToken),
-        digest: file_digest_hex(&package_dir.join("artifacts").join("repo-index.json")).ok(),
+        digest,
         source_commit: None,
         enabled: true,
     })
+}
+
+fn tag_from_index_uri(index_uri: &str) -> Option<String> {
+    index_uri
+        .rsplit_once(':')
+        .map(|(_, tag)| tag.to_string())
+        .filter(|tag| !tag.is_empty())
 }
 
 fn sync_cached_index_from_package(
@@ -862,6 +1043,7 @@ fn sync_cached_index_from_package(
     package_dir: &Path,
     indexes_root: &Path,
     digest: Option<String>,
+    channel: Option<String>,
 ) -> Result<SyncedRepoState, String> {
     let target = local_index_path_for(indexes_root, repo);
     fs::create_dir_all(&target)
@@ -890,11 +1072,14 @@ fn sync_cached_index_from_package(
         .map_err(|error| error.to_string())?;
     Ok(SyncedRepoState {
         repo_id: repo.repo_id.clone(),
+        channel,
+        branch: repo.selected_branch(None).map(|(branch, _)| branch),
         tenant: repo.tenant.clone(),
         visibility: repo.visibility,
         package_ref: repo.package_ref.clone(),
         digest,
         source_commit: repo.source_commit.clone(),
+        indexed_at: Some(repo.updated_at.clone()).filter(|value| !value.is_empty()),
         downloaded_at: timestamp_string(),
         local_index_path: target,
         local_tantivy_path: Some(tantivy_path),
@@ -902,9 +1087,12 @@ fn sync_cached_index_from_package(
 }
 
 fn upsert_synced_repo(state: &mut SyncState, entry: SyncedRepoState) {
-    state
-        .repos
-        .retain(|repo| repo.repo_id != entry.repo_id || repo.tenant != entry.tenant);
+    state.repos.retain(|repo| {
+        repo.repo_id != entry.repo_id
+            || repo.tenant != entry.tenant
+            || repo.branch != entry.branch
+            || repo.channel != entry.channel
+    });
     state.repos.push(entry);
 }
 
@@ -926,39 +1114,60 @@ fn recover_cached_indexes_under(
     visibility: IndexVisibility,
     state: &mut SyncState,
 ) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for org_entry in entries.flatten() {
-        let org_path = org_entry.path();
-        if !org_path.is_dir() {
-            continue;
-        }
-        let Ok(repo_entries) = fs::read_dir(&org_path) else {
-            continue;
-        };
-        for repo_entry in repo_entries.flatten() {
-            let repo_path = repo_entry.path();
-            let repo_index_path = repo_path.join("repo-index.json");
-            if !repo_index_path.exists() {
-                continue;
-            }
-            let Ok(repo_index) = load_repo_index(&repo_index_path) else {
-                continue;
-            };
+    recover_cached_index_dirs(root, tenant, visibility, state);
+}
+
+fn recover_cached_index_dirs(
+    root: &Path,
+    tenant: Option<String>,
+    visibility: IndexVisibility,
+    state: &mut SyncState,
+) {
+    let repo_index_path = root.join("repo-index.json");
+    if repo_index_path.exists() {
+        if let Ok(repo_index) = load_repo_index(&repo_index_path) {
             let digest = file_digest_hex(&repo_index_path).ok();
+            let branch = repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone())
+                .or_else(|| {
+                    root.file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                });
             state.repos.push(SyncedRepoState {
                 repo_id: repo_index.repo_id.clone(),
-                tenant: tenant.clone(),
+                channel: branch.clone(),
+                branch,
+                tenant,
                 visibility,
                 package_ref: format!("ghcr.io/greenticai/indexes/{}:latest", repo_index.repo_id),
                 digest,
-                source_commit: None,
+                source_commit: repo_index
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.commit_sha.clone()),
+                indexed_at: repo_index
+                    .metadata
+                    .as_ref()
+                    .map(|metadata| metadata.indexed_at.clone()),
                 downloaded_at: timestamp_string(),
-                local_index_path: repo_path.clone(),
-                local_tantivy_path: Some(repo_path.join("tantivy")),
+                local_index_path: root.to_path_buf(),
+                local_tantivy_path: Some(root.join("tantivy")),
             });
         }
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        recover_cached_index_dirs(&path, tenant.clone(), visibility, state);
     }
 }
 
@@ -1051,9 +1260,9 @@ pub fn render_github_workflow() -> String {
 
 on:
   push:
-    branches: [main, master]
-  schedule:
-    - cron: "17 2 * * *"
+    branches:
+      - main
+      - develop
   workflow_dispatch:
 
 permissions:
@@ -1068,6 +1277,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -1088,13 +1299,13 @@ jobs:
         run: ./target/release/greentic-coding-agent search --engine auto --mode concept greentic --format json
 
       - name: Package index
-        run: ./target/release/greentic-coding-agent package-index --tag latest --format json | tee .greentic-agent-package.json
+        run: ./target/release/greentic-coding-agent package-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --format json | tee .greentic-agent-package.json
 
       - name: Publish index to GHCR when refresh is needed
         shell: bash
         run: |
           if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
-            ./target/release/greentic-coding-agent publish-index --tag latest --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
+            ./target/release/greentic-coding-agent publish-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
           else
             echo '{"published": false, "reason": "refresh not required"}' | tee .greentic-agent-publish.json
           fi
@@ -1289,7 +1500,8 @@ mod tests {
     use gca_core::{
         AuthKind, Catalog, ConceptDescriptor, FreshnessStatus, IndexVisibility,
         InstructionDescriptor, KnowledgeScope, LifecyclePhase, RepoAgentManifest, RepoIndex,
-        RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor, WorkflowDescriptor,
+        RepoIndexMetadata, RepoRole, ReuseDescriptor, SourceStats, ValidationDescriptor,
+        WorkflowDescriptor,
     };
     use std::collections::BTreeMap;
     use std::fs;
@@ -1318,6 +1530,16 @@ mod tests {
                 .package_dir
                 .join("artifacts/agents/AGENTS.md")
                 .exists()
+        );
+        assert_eq!(output.metadata.branch.as_deref(), Some("main"));
+        assert_eq!(output.metadata.commit_sha.as_deref(), Some("abc123"));
+        assert_eq!(
+            output.metadata.index_schema_version.as_deref(),
+            Some("gca.repo_index.v1")
+        );
+        assert_eq!(
+            output.metadata.tool_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
         );
     }
 
@@ -1386,7 +1608,9 @@ mod tests {
         let catalog = build_catalog(&remote_root).unwrap();
         assert_eq!(catalog.repos.len(), 2);
         assert_eq!(catalog.repos[0].repo_name, "alpha-repo");
+        assert!(catalog.repos[0].branches.contains_key("main"));
         assert_eq!(catalog.repos[1].repo_name, "beta-repo");
+        assert!(catalog.repos[1].branches.contains_key("main"));
     }
 
     #[test]
@@ -1527,6 +1751,7 @@ mod tests {
             .join("public")
             .join("greenticai")
             .join("greentic-coding-agent")
+            .join("main")
             .join("repo-index.json");
         assert_eq!(first.downloaded.len(), 1);
         assert!(first.failed.is_empty());
@@ -1603,6 +1828,7 @@ mod tests {
                 .join("public")
                 .join("greenticai")
                 .join("shared")
+                .join("main")
                 .join("repo-index.json")
                 .exists()
         );
@@ -1612,6 +1838,7 @@ mod tests {
                 .join("meeza")
                 .join("greenticai")
                 .join("tenant")
+                .join("main")
                 .join("repo-index.json")
                 .exists()
         );
@@ -1636,6 +1863,7 @@ mod tests {
                 .join("meeza")
                 .join("greenticai")
                 .join("tenant")
+                .join("main")
                 .join("repo-index.json")
                 .exists()
         );
@@ -1872,6 +2100,8 @@ mod tests {
         gca_core::Catalog {
             version: "v1".to_string(),
             generated_at: generated_at.to_string(),
+            catalog_id: Some("greenticai/public".to_string()),
+            default_channel: Some("latest".to_string()),
             repos: vec![gca_core::CatalogRepo {
                 repo_id: "greenticai/demo".to_string(),
                 repo_name: "demo".to_string(),
@@ -1879,6 +2109,9 @@ mod tests {
                 latest_tag: "latest".to_string(),
                 package_ref: "ghcr.io/greenticai/indexes/greenticai/demo:latest".to_string(),
                 updated_at: generated_at.to_string(),
+                default_branch: None,
+                preferred_branch: None,
+                branches: BTreeMap::new(),
                 visibility: gca_core::IndexVisibility::Public,
                 tenant: None,
                 required_auth: None,
@@ -1910,6 +2143,16 @@ mod tests {
             repo_name: manifest.repo_name.clone(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "unix:1".to_string(),
+            metadata: Some(RepoIndexMetadata {
+                repo_id: manifest.repo_id.clone(),
+                branch: Some("main".to_string()),
+                commit_sha: Some("abc123".to_string()),
+                commit_time: None,
+                indexed_at: "unix:1".to_string(),
+                index_schema_version: "gca.repo_index.v1".to_string(),
+                tool_version: env!("CARGO_PKG_VERSION").to_string(),
+                source_tree_hash: Some("fnv64:0000000000000001".to_string()),
+            }),
             freshness: FreshnessStatus::Fresh,
             manifest,
             concept_graph: vec![ConceptDescriptor {

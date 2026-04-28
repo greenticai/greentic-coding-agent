@@ -2,7 +2,7 @@ name: Greentic Agent Catalog
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, develop]
     paths:
       - ".greentic-agent/catalogs/**"
       - ".github/workflows/greentic-agent-catalog.yml"
@@ -36,7 +36,7 @@ jobs:
         run: ./target/release/greentic-coding-agent catalog validate --format json | tee .greentic-agent-catalog-validate.json
 
       - name: Publish public catalog to GHCR
-        run: ./target/release/greentic-coding-agent catalog publish --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-catalog-publish.json
+        run: ./target/release/greentic-coding-agent catalog publish --channel "${{ github.ref_name }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-catalog-publish.json
 
       - name: Upload catalog summaries
         uses: actions/upload-artifact@v4

@@ -1,8 +1,10 @@
 repo-index = {
   version: text,
+  ? repo_id: text,
   repo_name: text,
   repo_role: repo-role,
   generated_at: text,
+  ? metadata: repo-index-metadata,
   freshness: freshness-status,
   manifest: repo-agent-manifest,
   concept_graph: [* concept-descriptor],
@@ -16,9 +18,22 @@ repo-index = {
   source_stats: source-stats,
 }
 
+repo-index-metadata = {
+  repo_id: text,
+  ? branch: text,
+  ? commit_sha: text,
+  ? commit_time: text,
+  indexed_at: text,
+  index_schema_version: text,
+  tool_version: text,
+  ? source_tree_hash: text,
+}
+
 repo-agent-manifest = {
   version: text,
+  ? repo_id: text,
   repo_name: text,
+  ? org: text,
   repo_root: text,
   repo_role: repo-role,
   primary_language: text,

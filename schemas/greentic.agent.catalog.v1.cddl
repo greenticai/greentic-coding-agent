@@ -1,15 +1,44 @@
 catalog = {
   version: text,
   generated_at: text,
+  ? catalog_id: text,
+  ? default_channel: text,
   repos: [* catalog-repo],
+  ? change_log: [* catalog-change],
 }
 
 catalog-repo = {
+  ? repo_id: text,
   repo_name: text,
   repo_role: repo-role,
   latest_tag: text,
   package_ref: text,
   updated_at: text,
+  ? default_branch: text,
+  ? preferred_branch: text,
+  ? branches: { * text => catalog-branch-entry },
+  ? visibility: index-visibility,
+  ? tenant: text / null,
+  ? required_auth: auth-kind / null,
+  ? digest: text / null,
+  ? source_commit: text / null,
+  ? enabled: bool,
+}
+
+catalog-branch-entry = {
+  index_uri: text,
+  ? commit_sha: text,
+  ? updated_at: text,
+  ? digest: text,
+}
+
+catalog-change = {
+  action: catalog-action,
+  repo_id: text,
+  ? tenant: text / null,
+  at: text,
+  ? by: text / null,
+  ? reason: text / null,
 }
 
 repo-role = &(
@@ -25,4 +54,23 @@ repo-role = &(
   demo_app: "demo_app",
   customer_solution: "customer_solution",
   examples_only: "examples_only",
+)
+
+index-visibility = &(
+  public: "public",
+  tenant: "tenant",
+  private: "private",
+)
+
+auth-kind = &(
+  ghcr_token: "ghcr_token",
+  bearer_token: "bearer_token",
+)
+
+catalog-action = &(
+  add_repo: "add_repo",
+  remove_repo: "remove_repo",
+  enable_repo: "enable_repo",
+  disable_repo: "disable_repo",
+  publish: "publish",
 )

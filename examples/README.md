@@ -14,7 +14,7 @@ This directory contains committed example artifacts for the current implemented 
   Example descriptor payloads used by fixture tests.
 - `greentic-agent-index.workflow.yml`, `greentic-agent-catalog.workflow.yml`
   Example installed GitHub workflow outputs from `install-github-workflow`.
-- `mcp-request.describe-repo.json`, `mcp-request.search-all.json`
+- `mcp-request.describe-repo.json`, `mcp-request.search-all.json`, `mcp-request.gca-agent-context.json`
   Example MCP-style request payloads for stdio/request-file dispatch.
 - `server-search-request.json`
   Example HTTP `/search` request body.
@@ -37,6 +37,7 @@ cargo run -p greentic-coding-agent -- check-refresh --format json
 cargo run -p greentic-coding-agent -- serve --format json
 cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.describe-repo.json --format json
 cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.search-all.json --format json
+cargo run -p greentic-coding-agent -- serve --request-file examples/mcp-request.gca-agent-context.json --format json
 cargo run -p greentic-coding-agent -- validate-plan examples/plan.v1.json --format markdown
 cargo run -p greentic-coding-agent -- course recommend --task "create a component" --format json
 cargo run -p greentic-coding-agent -- updates --task "create a component" --format json

@@ -2,6 +2,8 @@
 
 This guide explains how to enable Greentic Coding Agent across Greentic repositories so indexes are generated, published, synced, and usable by developers and coding agents.
 
+For the split between CI producer work and developer/agent consumer work, see [docs/producer-vs-consumer.md](docs/producer-vs-consumer.md). For local cache paths used by `sync`, `status`, `watch`, and org-level updates, see [docs/local-cache-layout.md](docs/local-cache-layout.md).
+
 ## Goal
 
 For each Greentic repo, the setup should:
@@ -98,7 +100,10 @@ This reports whether the repo has changed since the last local index.
 ### 4. Package The Index
 
 ```bash
-greentic-coding-agent package-index --tag latest --format json
+greentic-coding-agent package-index \
+  --tag main \
+  --tag sha-<commit> \
+  --format json
 ```
 
 This creates an OCI-style package layout for the repo index.
@@ -107,7 +112,8 @@ This creates an OCI-style package layout for the repo index.
 
 ```bash
 greentic-coding-agent publish-index \
-  --tag latest \
+  --tag main \
+  --tag sha-<commit> \
   --backend ghcr \
   --token-env GHCR_TOKEN \
   --format json
@@ -116,7 +122,8 @@ greentic-coding-agent publish-index \
 The expected package reference follows this shape:
 
 ```text
-ghcr.io/greenticai/indexes/<org>/<repo>:latest
+ghcr.io/greenticai/indexes/<org>/<repo>:main
+ghcr.io/greenticai/indexes/<org>/<repo>:sha-<commit>
 ```
 
 ## Install The GitHub Workflow
@@ -143,7 +150,7 @@ This writes:
 
 Commit the workflow and open a normal PR in the target repo.
 
-The generated workflow analyzes the repo, builds/checks the local index, packages it, and publishes to GHCR.
+The generated workflow analyzes the repo, builds/checks the local index, packages it for the current branch and commit SHA, and publishes both tags to GHCR. It uses `GITHUB_TOKEN` through `GHCR_TOKEN`, so the workflow needs `packages: write`.
 
 ## Catalog Setup
 
@@ -179,12 +186,24 @@ Publish:
 
 ```bash
 greentic-coding-agent catalog publish \
+  --channel develop \
   --backend ghcr \
   --token-env GHCR_TOKEN \
   --format json
 ```
 
 For tenant catalogs, pass the tenant options used by your environment.
+
+Rebuild the central branch-aware catalog from published repo indexes:
+
+```bash
+greentic-coding-agent catalog rebuild-from-ghcr \
+  --org greenticai \
+  --channel develop \
+  --format json
+greentic-coding-agent catalog validate --format json
+greentic-coding-agent catalog publish --channel develop --backend ghcr --token-env GHCR_TOKEN --format json
+```
 
 ## Organization-Wide Rollout
 
@@ -236,7 +255,15 @@ See [docs/org-index-rollout.md](docs/org-index-rollout.md).
 After indexes are published and cataloged, developers and agents can sync them locally:
 
 ```bash
+greentic-coding-agent init --channel main --format json
 greentic-coding-agent sync --format json
+```
+
+To use a branch-specific channel, sync and inspect that channel explicitly:
+
+```bash
+greentic-coding-agent sync --channel develop --format json
+greentic-coding-agent status --channel develop --format json
 ```
 
 For tenant/private indexes:
@@ -244,6 +271,7 @@ For tenant/private indexes:
 ```bash
 greentic-coding-agent sync \
   --backend ghcr \
+  --channel main \
   --tenant <tenant> \
   --token-env TENANT_GHCR_TOKEN \
   --format json
@@ -254,6 +282,7 @@ For public GHCR indexes:
 ```bash
 greentic-coding-agent sync \
   --backend ghcr \
+  --channel main \
   --token-env GHCR_TOKEN \
   --format json
 ```

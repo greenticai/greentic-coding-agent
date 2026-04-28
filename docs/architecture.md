@@ -52,7 +52,9 @@ future `gtc dev coding-agent` integration to call
 service while legacy transport-specific paths remain in place. Re-enabling
 crates.io publishing requires a package strategy for the internal crates:
 publish/version the shared crates in dependency order or add a separate
-publishable wrapper that does not depend on unpublished path dependencies.
+publishable wrapper that does not depend on unpublished path dependencies. Until
+then release distribution should use built binaries or GitHub release assets
+rather than `cargo install` or `cargo binstall`.
 
 ---
 
@@ -746,6 +748,12 @@ gtc dev coding-agent serve
 
 Recommended first MCP tools:
 
+- `gca.search`
+- `gca.agent_context`
+- `gca.find_owner`
+- `gca.required_validations`
+- `gca.recent_updates`
+- `gca.branch_status`
 - `describe_repo`
 - `list_workflows`
 - `explain_concept`

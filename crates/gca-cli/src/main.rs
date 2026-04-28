@@ -138,6 +138,9 @@ enum Commands {
     Updates {
         #[command(subcommand)]
         command: Option<UpdatesCommands>,
+        /// Update scope: `repo` for current checkout updates or `org` for synced notification feed.
+        #[arg(long, default_value = "repo")]
+        scope: String,
         /// Filter updates by task text.
         #[arg(long)]
         task: Option<String>,
@@ -163,6 +166,11 @@ enum Commands {
     Org {
         #[command(subcommand)]
         command: OrgCommands,
+    },
+    /// Agent-facing helpers backed by the global merged index.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommands,
     },
     /// Search indexed code, instructions, concepts, reuse policy, courses, or updates.
     Search {
@@ -208,8 +216,8 @@ enum Commands {
     /// Package the local index and generated agent files into an OCI-style layout.
     PackageIndex {
         /// Package tag to write under `.greentic-agent/oci/<repo>/<tag>`.
-        #[arg(long, default_value = "latest")]
-        tag: String,
+        #[arg(long = "tag", default_value = "latest")]
+        tag: Vec<String>,
         /// Output format for the package result.
         #[arg(long, default_value = "markdown")]
         format: String,
@@ -217,8 +225,8 @@ enum Commands {
     /// Copy the packaged local index into the simulated remote OCI store.
     PublishIndex {
         /// Tag to publish from the local OCI-style package output.
-        #[arg(long, default_value = "latest")]
-        tag: String,
+        #[arg(long = "tag", default_value = "latest")]
+        tag: Vec<String>,
         /// Publish to GHCR. Alias for `--backend ghcr`.
         #[arg(long)]
         ghcr: bool,
@@ -255,6 +263,9 @@ enum Commands {
     },
     /// Watch catalogs/indexes and rebuild the merged query index when they change.
     WatchIndexes {
+        /// Branch/channel to sync from the catalog, for example `main` or `develop`.
+        #[arg(long)]
+        channel: Option<String>,
         /// Tenant name for tenant-aware sync.
         #[arg(long)]
         tenant: Option<String>,
@@ -277,6 +288,66 @@ enum Commands {
         #[arg(long)]
         once: bool,
         /// Output format for watcher events.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Watch catalogs/indexes and write org notification feed items.
+    Watch {
+        /// Branch/channel to sync from the catalog, for example `main` or `develop`.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Poll interval such as `30s`, `10m`, or seconds.
+        #[arg(long, default_value = "5m")]
+        poll: String,
+        /// Tenant name for tenant-aware sync.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Registry token value. Prefer `--token-env`.
+        #[arg(long)]
+        token: Option<String>,
+        /// Environment variable containing the registry token.
+        #[arg(long)]
+        token_env: Option<String>,
+        /// Treat private sync failures as errors.
+        #[arg(long)]
+        strict_sync: bool,
+        /// Remove disabled repos from the local cache.
+        #[arg(long)]
+        prune_disabled: bool,
+        /// Run one watcher tick and exit.
+        #[arg(long)]
+        once: bool,
+        /// Output format for watcher events.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Foreground daemon loop for keeping the global cache current.
+    Daemon {
+        /// Branch/channel to sync from the catalog, for example `main` or `develop`.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Poll interval such as `30s`, `10m`, or seconds.
+        #[arg(long, default_value = "5m")]
+        poll: String,
+        /// Tenant name for tenant-aware sync.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Registry token value. Prefer `--token-env`.
+        #[arg(long)]
+        token: Option<String>,
+        /// Environment variable containing the registry token.
+        #[arg(long)]
+        token_env: Option<String>,
+        /// Treat private sync failures as errors.
+        #[arg(long)]
+        strict_sync: bool,
+        /// Remove disabled repos from the local cache.
+        #[arg(long)]
+        prune_disabled: bool,
+        /// Run one daemon tick and exit.
+        #[arg(long)]
+        once: bool,
+        /// Output format for daemon events.
         #[arg(long, default_value = "markdown")]
         format: String,
     },
@@ -388,6 +459,9 @@ enum Commands {
         /// Optional tag to sync when `--repo` is provided. Defaults to `latest`.
         #[arg(long)]
         tag: Option<String>,
+        /// Branch/channel to sync from the catalog, for example `main` or `develop`.
+        #[arg(long)]
+        channel: Option<String>,
         /// Public catalog OCI reference.
         #[arg(long)]
         catalog: Option<String>,
@@ -422,6 +496,24 @@ enum Commands {
         #[arg(long)]
         prune_disabled: bool,
         /// Output format for the sync result.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Prepare the local Greentic Coding Agent cache directories.
+    Init {
+        /// Default channel to write into the local config.
+        #[arg(long, default_value = "main")]
+        channel: String,
+        /// Output format for the init result.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Show local sync/cache status.
+    Status {
+        /// Channel to report, for example `main` or `develop`.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Output format for the status result.
         #[arg(long, default_value = "markdown")]
         format: String,
     },
@@ -519,6 +611,9 @@ enum CatalogCommands {
     Publish {
         #[arg(long)]
         tenant: Option<String>,
+        /// Branch/channel tag for the published catalog.
+        #[arg(long)]
+        channel: Option<String>,
         #[arg(long)]
         expected_digest: Option<String>,
         #[arg(long, default_value = "local")]
@@ -527,6 +622,21 @@ enum CatalogCommands {
         token: Option<String>,
         #[arg(long)]
         token_env: Option<String>,
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Rebuild the editable catalog from published repo index packages.
+    RebuildFromGhcr {
+        /// GitHub organization to include, for example `greenticai`.
+        #[arg(long)]
+        org: String,
+        /// Preferred/default channel for the rebuilt catalog.
+        #[arg(long)]
+        channel: String,
+        /// Tenant catalog to rebuild.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Output format for the rebuilt catalog.
         #[arg(long, default_value = "markdown")]
         format: String,
     },
@@ -589,6 +699,58 @@ enum OrgCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum AgentCommands {
+    /// Build task context from the global merged index and local repo overlay.
+    Context {
+        /// Task description used to select relevant repos, owners, updates, courses, and validations.
+        #[arg(long)]
+        task: String,
+        /// Branch/channel to read from local sync state.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Tenant name for tenant-aware context.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Output format for the context response.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Return preflight context and warnings for a specific task/repo pair.
+    Preflight {
+        /// Task description used to select relevant context.
+        #[arg(long)]
+        task: String,
+        /// Repo ID the agent expects to edit, for example `greenticai/greentic-pack`.
+        #[arg(long)]
+        repo: Option<String>,
+        /// Branch/channel to read from local sync state.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Tenant name for tenant-aware context.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Output format for the preflight response.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+    /// Find likely owner repos for a concept.
+    Owner {
+        /// Concept ID or search text to resolve.
+        #[arg(long)]
+        concept: String,
+        /// Branch/channel to read from local sync state.
+        #[arg(long)]
+        channel: Option<String>,
+        /// Tenant name for tenant-aware context.
+        #[arg(long)]
+        tenant: Option<String>,
+        /// Output format for the owner response.
+        #[arg(long, default_value = "markdown")]
+        format: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum UpdatesCommands {
     /// Show one knowledge update by ID.
     Show {
@@ -601,6 +763,9 @@ enum UpdatesCommands {
         update_id: Option<String>,
         #[arg(long)]
         all: bool,
+        /// Update scope: `repo` for current checkout updates or `org` for synced notification feed.
+        #[arg(long)]
+        scope: Option<String>,
         #[arg(long, default_value = "markdown")]
         format: String,
     },
@@ -633,18 +798,27 @@ fn main() {
                 Some(UpdatesCommands::MarkSeen {
                     update_id,
                     all,
+                    scope,
                     format,
                 }),
+            scope: parent_scope,
             ..
-        }) => run_updates_mark_seen(update_id.as_deref(), all, &format),
+        }) => run_updates_mark_seen(
+            update_id.as_deref(),
+            all,
+            scope.as_deref().unwrap_or(&parent_scope),
+            &format,
+        ),
         Some(Commands::Updates {
             command: None,
+            scope,
             task,
             concept,
             severity,
             new_only,
             format,
         }) => run_updates(
+            &scope,
             task.as_deref(),
             concept.as_deref(),
             severity.as_deref(),
@@ -653,6 +827,7 @@ fn main() {
         ),
         Some(Commands::Catalog { command }) => run_catalog_command(command),
         Some(Commands::Org { command }) => run_org_command(command),
+        Some(Commands::Agent { command }) => run_agent_command(command),
         Some(Commands::Concepts { format }) => run_concepts(&format),
         Some(Commands::Search {
             mode,
@@ -696,6 +871,7 @@ fn main() {
         Some(Commands::ShowCatalog { format }) => run_show_catalog(&format),
         Some(Commands::CheckRefresh { format }) => run_check_refresh(&format),
         Some(Commands::WatchIndexes {
+            channel,
             tenant,
             token,
             token_env,
@@ -706,6 +882,7 @@ fn main() {
             format,
         }) => run_watch_indexes(
             WatchOptions {
+                channel: channel.as_deref(),
                 tenant: tenant.as_deref(),
                 token: token.as_deref(),
                 token_env: token_env.as_deref(),
@@ -714,6 +891,48 @@ fn main() {
                 prune_disabled,
                 once,
             },
+            &format,
+        ),
+        Some(Commands::Watch {
+            channel,
+            poll,
+            tenant,
+            token,
+            token_env,
+            strict_sync,
+            prune_disabled,
+            once,
+            format,
+        }) => run_watch_alias(
+            channel.as_deref(),
+            &poll,
+            tenant.as_deref(),
+            token.as_deref(),
+            token_env.as_deref(),
+            strict_sync,
+            prune_disabled,
+            once,
+            &format,
+        ),
+        Some(Commands::Daemon {
+            channel,
+            poll,
+            tenant,
+            token,
+            token_env,
+            strict_sync,
+            prune_disabled,
+            once,
+            format,
+        }) => run_watch_alias(
+            channel.as_deref(),
+            &poll,
+            tenant.as_deref(),
+            token.as_deref(),
+            token_env.as_deref(),
+            strict_sync,
+            prune_disabled,
+            once,
             &format,
         ),
         Some(Commands::Impact { symbol, format }) => run_impact(&symbol, &format),
@@ -740,6 +959,7 @@ fn main() {
         Some(Commands::Sync {
             repo,
             tag,
+            channel,
             catalog,
             tenant,
             tenant_catalog,
@@ -756,6 +976,7 @@ fn main() {
             SyncOptions {
                 repo: repo.as_deref(),
                 tag: tag.as_deref(),
+                channel: channel.as_deref(),
                 catalog: catalog.as_deref(),
                 tenant: tenant.as_deref(),
                 tenant_catalog: tenant_catalog.as_deref(),
@@ -770,6 +991,8 @@ fn main() {
             },
             &format,
         ),
+        Some(Commands::Init { channel, format }) => run_init(&channel, &format),
+        Some(Commands::Status { channel, format }) => run_status(channel.as_deref(), &format),
         Some(Commands::RebuildMergedIndex { tenant, format }) => {
             run_rebuild_merged_index(tenant.as_deref(), &format)
         }
@@ -844,6 +1067,7 @@ fn placeholder_message(command: &Commands) -> &'static str {
         Commands::Updates { .. } => "updates is scaffolded but not implemented yet",
         Commands::Catalog { .. } => "catalog is scaffolded but not implemented yet",
         Commands::Org { .. } => "org is scaffolded but not implemented yet",
+        Commands::Agent { .. } => "agent is scaffolded but not implemented yet",
         Commands::Concepts { .. } => "concepts is scaffolded but not implemented yet",
         Commands::Workflows { .. } => "workflows is scaffolded but not implemented yet",
         Commands::Search { .. } => "search is scaffolded but not implemented yet",
@@ -859,6 +1083,8 @@ fn placeholder_message(command: &Commands) -> &'static str {
         Commands::ShowCatalog { .. } => "show-catalog is scaffolded but not implemented yet",
         Commands::CheckRefresh { .. } => "check-refresh is scaffolded but not implemented yet",
         Commands::WatchIndexes { .. } => "watch-indexes is scaffolded but not implemented yet",
+        Commands::Watch { .. } => "watch is scaffolded but not implemented yet",
+        Commands::Daemon { .. } => "daemon is scaffolded but not implemented yet",
         Commands::Impact { .. } => "impact is scaffolded but not implemented yet",
         Commands::DetectChanges { .. } => "detect-changes is scaffolded but not implemented yet",
         Commands::ValidatePlan { .. } => "validate-plan is scaffolded but not implemented yet",
@@ -871,6 +1097,8 @@ fn placeholder_message(command: &Commands) -> &'static str {
             "install-github-workflow is scaffolded but not implemented yet"
         }
         Commands::Sync { .. } => "sync is scaffolded but not implemented yet",
+        Commands::Init { .. } => "init is scaffolded but not implemented yet",
+        Commands::Status { .. } => "status is scaffolded but not implemented yet",
         Commands::RebuildMergedIndex { .. } => {
             "rebuild-merged-index is scaffolded but not implemented yet"
         }
@@ -1320,6 +1548,7 @@ fn print_training_course(course: &EngineTrainingCourseDescriptor) {
 }
 
 fn run_updates(
+    scope: &str,
     task: Option<&str>,
     concept: Option<&str>,
     severity: Option<&str>,
@@ -1333,6 +1562,13 @@ fn run_updates(
             return 2;
         }
     };
+    if scope == "org" {
+        return run_org_updates(new_only, format);
+    }
+    if scope != "repo" {
+        eprintln!("unsupported update scope: {scope}");
+        return 2;
+    }
     match engine_service().and_then(|service| {
         service
             .updates(gca_engine::UpdatesOptions {
@@ -1377,7 +1613,7 @@ fn run_updates(
     }
 }
 
-fn run_updates_mark_seen(update_id: Option<&str>, all: bool, format: &str) -> i32 {
+fn run_updates_mark_seen(update_id: Option<&str>, all: bool, scope: &str, format: &str) -> i32 {
     if !all && update_id.is_none() {
         eprintln!("updates mark-seen requires an update ID or --all");
         return 2;
@@ -1389,6 +1625,13 @@ fn run_updates_mark_seen(update_id: Option<&str>, all: bool, format: &str) -> i3
             return 2;
         }
     };
+    if scope == "org" {
+        return run_org_updates_mark_seen(update_id, all, format);
+    }
+    if scope != "repo" {
+        eprintln!("unsupported update scope: {scope}");
+        return 2;
+    }
     match engine_service().and_then(|service| {
         service
             .mark_knowledge_update_seen(gca_engine::MarkKnowledgeUpdateSeenOptions {
@@ -1463,6 +1706,86 @@ fn run_update_show(update_id: &str, format: &str) -> i32 {
             1
         }
     }
+}
+
+fn run_org_updates(new_only: bool, format: OutputFormat) -> i32 {
+    let feed = load_notification_feed(&home_dir());
+    let seen = load_notification_seen_state(&home_dir());
+    let mut items = feed.items;
+    if new_only {
+        items.retain(|item| !seen.seen.contains_key(&item.id));
+    }
+    items.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then(left.repo_id.cmp(&right.repo_id))
+            .then(left.id.cmp(&right.id))
+    });
+    match format {
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&items).expect("notification feed should serialize")
+        ),
+        OutputFormat::Markdown => {
+            println!("# Org Knowledge Updates");
+            println!();
+            if items.is_empty() {
+                println!("No org knowledge updates found.");
+            }
+            for item in &items {
+                println!("- `{}` [{}]: {}", item.id, item.branch, item.agent_impact);
+            }
+        }
+    }
+    0
+}
+
+fn run_org_updates_mark_seen(update_id: Option<&str>, all: bool, format: OutputFormat) -> i32 {
+    let home = home_dir();
+    let feed = load_notification_feed(&home);
+    let mut seen = load_notification_seen_state(&home);
+    let seen_at = timestamp_string();
+    let mut marked = Vec::new();
+    if all {
+        for item in &feed.items {
+            seen.seen.insert(item.id.clone(), seen_at.clone());
+            marked.push(item.id.clone());
+        }
+    } else if let Some(update_id) = update_id
+        && feed.items.iter().any(|item| item.id == update_id)
+    {
+        seen.seen.insert(update_id.to_string(), seen_at);
+        marked.push(update_id.to_string());
+    }
+    if let Err(error) = write_notification_seen_state(&home, &seen) {
+        eprintln!("{error}");
+        return 1;
+    }
+    match format {
+        OutputFormat::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "state_path": notification_seen_path(&home),
+                "marked_updates": marked,
+                "state": seen,
+            }))
+            .expect("notification seen-state should serialize")
+        ),
+        OutputFormat::Markdown => {
+            println!("# Mark Org Updates Seen");
+            println!();
+            println!("- State: `{}`", notification_seen_path(&home).display());
+            if marked.is_empty() {
+                println!("- No updates marked.");
+            } else {
+                for update in marked {
+                    println!("- Marked `{update}`");
+                }
+            }
+        }
+    }
+    0
 }
 
 fn print_knowledge_update(update: &EngineKnowledgeUpdateDescriptor) {
@@ -1660,6 +1983,377 @@ fn run_locate_owner(concept: &str, format: &str) -> i32 {
     }
 }
 
+fn run_agent_command(command: AgentCommands) -> i32 {
+    match command {
+        AgentCommands::Context {
+            task,
+            channel,
+            tenant,
+            format,
+        } => run_agent_context(&task, channel.as_deref(), tenant.as_deref(), &format),
+        AgentCommands::Preflight {
+            task,
+            repo,
+            channel,
+            tenant,
+            format,
+        } => run_agent_preflight(
+            &task,
+            repo.as_deref(),
+            channel.as_deref(),
+            tenant.as_deref(),
+            &format,
+        ),
+        AgentCommands::Owner {
+            concept,
+            channel,
+            tenant,
+            format,
+        } => run_agent_owner(&concept, channel.as_deref(), tenant.as_deref(), &format),
+    }
+}
+
+fn run_agent_context(task: &str, channel: Option<&str>, tenant: Option<&str>, format: &str) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let response = build_agent_context(task, channel, tenant, None);
+    print_agent_context(&response, format);
+    0
+}
+
+fn run_agent_preflight(
+    task: &str,
+    repo: Option<&str>,
+    channel: Option<&str>,
+    tenant: Option<&str>,
+    format: &str,
+) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let response = build_agent_context(task, channel, tenant, repo);
+    print_agent_context(&response, format);
+    0
+}
+
+fn run_agent_owner(
+    concept: &str,
+    channel: Option<&str>,
+    tenant: Option<&str>,
+    format: &str,
+) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let response = build_agent_context(concept, channel, tenant, None);
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "concept": concept,
+                    "channel": response.channel,
+                    "owner_candidates": response.owner_candidates,
+                    "warnings": response.warnings,
+                }))
+                .expect("agent owner response should serialize")
+            );
+        }
+        OutputFormat::Markdown => {
+            println!("# Agent Owner");
+            println!();
+            println!("- Concept: `{concept}`");
+            println!("- Channel: `{}`", response.channel);
+            if response.owner_candidates.is_empty() {
+                println!("- Owner candidates: none");
+            } else {
+                println!();
+                println!("Owner candidates:");
+                for owner in &response.owner_candidates {
+                    println!("- `{}` owns `{}`", owner.owner_repo, owner.concept_id);
+                }
+            }
+            print_agent_warnings(&response.warnings);
+        }
+    }
+    0
+}
+
+fn build_agent_context(
+    task: &str,
+    channel: Option<&str>,
+    tenant: Option<&str>,
+    preflight_repo: Option<&str>,
+) -> AgentContextResponse {
+    let home = home_dir();
+    let selected_channel = channel
+        .map(ToString::to_string)
+        .or_else(|| default_channel_from_config(&home))
+        .unwrap_or_else(|| "develop".to_string());
+    let mut warnings = Vec::new();
+    let mut relevant_repos = BTreeMap::<String, AgentRepoCandidate>::new();
+    let mut owner_candidates = Vec::<OwnerLookup>::new();
+    let mut required_validations_by_id = BTreeMap::<String, ValidationDescriptor>::new();
+    let mut recent_updates_by_id = BTreeMap::<String, KnowledgeUpdateDescriptor>::new();
+    let mut tutorials_by_id = BTreeMap::<String, TrainingCourseDescriptor>::new();
+
+    let cached = match load_cached_repo_indexes(&home, tenant) {
+        Ok(cached) => cached,
+        Err(error) => {
+            warnings.push(error);
+            Vec::new()
+        }
+    };
+    if cached.is_empty() {
+        warnings.push(
+            "no global synced indexes found; run `greentic-coding-agent sync --channel <channel>`"
+                .to_string(),
+        );
+    }
+
+    for cached_index in cached
+        .iter()
+        .filter(|entry| synced_entry_matches_channel(&entry.state, &selected_channel))
+    {
+        collect_agent_context_from_repo(
+            &cached_index.repo_index,
+            cached_index
+                .repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone()),
+            "global",
+            task,
+            &mut relevant_repos,
+            &mut owner_candidates,
+            &mut required_validations_by_id,
+            &mut recent_updates_by_id,
+            &mut tutorials_by_id,
+        );
+    }
+
+    if let Ok(local_index) = load_or_analyze_repo_index() {
+        collect_agent_context_from_repo(
+            &local_index,
+            local_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone()),
+            "local_overlay",
+            task,
+            &mut relevant_repos,
+            &mut owner_candidates,
+            &mut required_validations_by_id,
+            &mut recent_updates_by_id,
+            &mut tutorials_by_id,
+        );
+    }
+
+    if let Some(repo) = preflight_repo
+        && !relevant_repos.contains_key(repo)
+    {
+        warnings.push(format!(
+            "requested repo `{repo}` did not match task context in channel `{selected_channel}`"
+        ));
+    }
+
+    owner_candidates.sort_by(|left, right| {
+        left.owner_repo
+            .cmp(&right.owner_repo)
+            .then(left.concept_id.cmp(&right.concept_id))
+    });
+    owner_candidates.dedup_by(|left, right| {
+        left.owner_repo == right.owner_repo && left.concept_id == right.concept_id
+    });
+
+    AgentContextResponse {
+        task: task.to_string(),
+        channel: selected_channel,
+        relevant_repos: relevant_repos.into_values().collect(),
+        owner_candidates,
+        required_validations: required_validations_by_id.into_values().collect(),
+        recent_updates: recent_updates_by_id.into_values().collect(),
+        tutorials: tutorials_by_id.into_values().collect(),
+        warnings,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_agent_context_from_repo(
+    repo_index: &RepoIndex,
+    branch: Option<String>,
+    source: &str,
+    task: &str,
+    relevant_repos: &mut BTreeMap<String, AgentRepoCandidate>,
+    owner_candidates: &mut Vec<OwnerLookup>,
+    required_validations_by_id: &mut BTreeMap<String, ValidationDescriptor>,
+    recent_updates_by_id: &mut BTreeMap<String, KnowledgeUpdateDescriptor>,
+    tutorials_by_id: &mut BTreeMap<String, TrainingCourseDescriptor>,
+) {
+    let mut matched = Vec::new();
+    if text_matches_task(&repo_index.repo_id, task)
+        || text_matches_task(&repo_index.repo_name, task)
+    {
+        matched.push("repo".to_string());
+    }
+    for concept in &repo_index.concept_graph {
+        if text_matches_task(&concept.id, task)
+            || text_matches_task(&concept.title, task)
+            || text_matches_task(&concept.summary, task)
+        {
+            matched.push(format!("concept:{}", concept.id));
+        }
+    }
+    for instruction in &repo_index.instruction_graph {
+        if text_matches_task(&instruction.title, task)
+            || text_matches_task(&instruction.path, task)
+            || instruction
+                .commands
+                .iter()
+                .any(|command| text_matches_task(command, task))
+        {
+            matched.push(format!("instruction:{}", instruction.id));
+        }
+    }
+    for reuse in &repo_index.reuse {
+        if text_matches_task(&reuse.concept_id, task) || text_matches_task(&reuse.rationale, task) {
+            matched.push(format!("owner:{}", reuse.concept_id));
+            owner_candidates.push(OwnerLookup {
+                concept_id: reuse.concept_id.clone(),
+                owner_repo: reuse.owner_repo.clone(),
+                rationale: reuse.rationale.clone(),
+                forbidden_locations: reuse.forbidden_locations.clone(),
+                required_validations: reuse.required_validations.clone(),
+            });
+        }
+    }
+    for validation in required_validations(repo_index, task).validations {
+        matched.push(format!("validation:{}", validation.id));
+        required_validations_by_id.insert(validation.id.clone(), validation);
+    }
+    for update in &repo_index.knowledge_updates {
+        if text_matches_task(&update.title, task)
+            || text_matches_task(&update.summary, task)
+            || text_matches_task(&update.agent_instruction, task)
+            || update
+                .affected_concepts
+                .iter()
+                .any(|concept| text_matches_task(concept, task))
+        {
+            matched.push(format!("update:{}", update.id));
+            recent_updates_by_id.insert(update.id.clone(), update.clone());
+        }
+    }
+    for course in &repo_index.training_courses {
+        if text_matches_task(&course.title, task)
+            || text_matches_task(&course.summary, task)
+            || course
+                .tasks
+                .iter()
+                .any(|course_task| text_matches_task(course_task, task))
+            || course
+                .teaches_concepts
+                .iter()
+                .any(|concept| text_matches_task(concept, task))
+        {
+            matched.push(format!("course:{}", course.id));
+            tutorials_by_id.insert(course.id.clone(), course.clone());
+        }
+    }
+    matched.sort();
+    matched.dedup();
+    if !matched.is_empty() {
+        relevant_repos.insert(
+            repo_index.repo_id.clone(),
+            AgentRepoCandidate {
+                repo_id: repo_index.repo_id.clone(),
+                branch,
+                source: source.to_string(),
+                matched,
+            },
+        );
+    }
+}
+
+fn text_matches_task(text: &str, task: &str) -> bool {
+    let text = text.to_ascii_lowercase().replace(['_', '-'], " ");
+    task.to_ascii_lowercase()
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .filter(|token| token.len() > 2)
+        .any(|token| text.contains(token))
+}
+
+fn synced_entry_matches_channel(entry: &SyncedRepoState, channel: &str) -> bool {
+    let suffix = format!(":{channel}");
+    entry.package_ref.ends_with(&suffix)
+        || entry
+            .local_index_path
+            .components()
+            .any(|component| component.as_os_str().to_string_lossy() == channel)
+}
+
+fn default_channel_from_config(home: &Path) -> Option<String> {
+    let raw = fs::read_to_string(home.join(".greentic-agent").join("config.toml")).ok()?;
+    raw.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("default_channel")
+            .and_then(|value| value.split_once('='))
+            .map(|(_, value)| value.trim().trim_matches('"').to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn print_agent_context(response: &AgentContextResponse, format: OutputFormat) {
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(response)
+                    .expect("agent context response should serialize")
+            );
+        }
+        OutputFormat::Markdown => {
+            println!("# Agent Context");
+            println!();
+            println!("- Task: {}", response.task);
+            println!("- Channel: `{}`", response.channel);
+            println!("- Relevant repos: {}", response.relevant_repos.len());
+            println!("- Owner candidates: {}", response.owner_candidates.len());
+            println!(
+                "- Required validations: {}",
+                response.required_validations.len()
+            );
+            println!("- Recent updates: {}", response.recent_updates.len());
+            println!("- Tutorials: {}", response.tutorials.len());
+            print_agent_warnings(&response.warnings);
+        }
+    }
+}
+
+fn print_agent_warnings(warnings: &[String]) {
+    if !warnings.is_empty() {
+        println!();
+        println!("Warnings:");
+        for warning in warnings {
+            println!("- {warning}");
+        }
+    }
+}
+
 fn run_required_validations(task: &str, format: &str) -> i32 {
     let format = match OutputFormat::parse(format) {
         Ok(format) => format,
@@ -1748,7 +2442,7 @@ fn run_generate_agent_files(write_root: bool, format: &str) -> i32 {
     }
 }
 
-fn run_package_index(tag: &str, format: &str) -> i32 {
+fn run_package_index(tags: &[String], format: &str) -> i32 {
     let format = match OutputFormat::parse(format) {
         Ok(format) => format,
         Err(error) => {
@@ -1760,7 +2454,7 @@ fn run_package_index(tag: &str, format: &str) -> i32 {
     match engine_service().and_then(|service| {
         service
             .package_index(gca_engine::PackageIndexOptions {
-                tag: tag.to_string(),
+                tags: tags.to_vec(),
             })
             .map_err(|error| error.to_string())
     }) {
@@ -1768,17 +2462,16 @@ fn run_package_index(tag: &str, format: &str) -> i32 {
             match format {
                 OutputFormat::Json => println!(
                     "{}",
-                    serde_json::to_string_pretty(&response.package)
+                    serde_json::to_string_pretty(&response.packages)
                         .expect("package result should serialize")
                 ),
                 OutputFormat::Markdown => {
                     println!("# Package Index");
                     println!();
-                    println!("- Reference: `{}`", response.package.reference);
-                    println!(
-                        "- Package dir: `{}`",
-                        response.package.package_dir.display()
-                    );
+                    for package in response.packages {
+                        println!("- Reference: `{}`", package.reference);
+                        println!("- Package dir: `{}`", package.package_dir.display());
+                    }
                 }
             }
             0
@@ -1791,7 +2484,7 @@ fn run_package_index(tag: &str, format: &str) -> i32 {
 }
 
 fn run_publish_index(
-    tag: &str,
+    tags: &[String],
     backend: &str,
     token: Option<&str>,
     token_env: Option<&str>,
@@ -1808,7 +2501,7 @@ fn run_publish_index(
         return match engine_service().and_then(|service| {
             service
                 .publish_index(gca_engine::PublishIndexOptions {
-                    tag: tag.to_string(),
+                    tags: tags.to_vec(),
                     remote_root: None,
                 })
                 .map_err(|error| error.to_string())
@@ -1817,13 +2510,15 @@ fn run_publish_index(
                 match format {
                     OutputFormat::Json => println!(
                         "{}",
-                        serde_json::to_string_pretty(&response.published_path)
+                        serde_json::to_string_pretty(&response.published_paths)
                             .expect("publish target should serialize")
                     ),
                     OutputFormat::Markdown => {
                         println!("# Publish Index");
                         println!();
-                        println!("- Remote store: `{}`", response.published_path.display());
+                        for path in response.published_paths {
+                            println!("- Remote store: `{}`", path.display());
+                        }
                     }
                 }
                 0
@@ -1844,7 +2539,8 @@ fn run_publish_index(
     let remote_root = default_remote_store_path(&home_dir());
     let remote_config = match resolve_remote_config(SyncOptions {
         repo: None,
-        tag: Some(tag),
+        tag: tags.first().map(String::as_str),
+        channel: None,
         catalog: None,
         tenant: None,
         tenant_catalog: None,
@@ -1865,56 +2561,83 @@ fn run_publish_index(
     };
 
     match load_or_analyze_repo_index() {
-        Ok(repo_index) => match package_index_layout(&repo_root, &repo_index, tag) {
-            Ok(result) => {
-                let target = match remote_config.backend {
-                    RemoteBackendKind::LocalFixture => {
-                        let target = remote_root
-                            .join(repo_id_path(&repo_index.repo_id))
-                            .join(tag);
-                        if let Err(error) = copy_dir_all(&result.package_dir, &target) {
-                            eprintln!("failed to publish package: {error}");
-                            return 1;
-                        }
-                        target
+        Ok(repo_index) => {
+            let mut results = Vec::new();
+            let mut targets = Vec::new();
+            for tag in normalized_cli_tags(tags) {
+                match package_index_layout(&repo_root, &repo_index, &tag) {
+                    Ok(result) => {
+                        let target = match remote_config.backend {
+                            RemoteBackendKind::LocalFixture => {
+                                let target = remote_root
+                                    .join(repo_id_path(&repo_index.repo_id))
+                                    .join(&tag);
+                                if let Err(error) = copy_dir_all(&result.package_dir, &target) {
+                                    eprintln!("failed to publish package: {error}");
+                                    return 1;
+                                }
+                                target
+                            }
+                            RemoteBackendKind::GhcrOras => {
+                                if let Err(error) = oras_push(
+                                    &result.reference,
+                                    &result.package_dir,
+                                    remote_config.auth.as_ref(),
+                                ) {
+                                    eprintln!("{error}");
+                                    return 1;
+                                }
+                                PathBuf::from(&result.reference)
+                            }
+                        };
+                        results.push(result);
+                        targets.push(target);
                     }
-                    RemoteBackendKind::GhcrOras => {
-                        if let Err(error) = oras_push(
-                            &result.reference,
-                            &result.package_dir,
-                            remote_config.auth.as_ref(),
-                        ) {
-                            eprintln!("{error}");
-                            return 1;
-                        }
-                        PathBuf::from(&result.reference)
+                    Err(error) => {
+                        eprintln!("failed to package index: {error}");
+                        return 1;
                     }
-                };
-                match format {
-                    OutputFormat::Json => println!(
-                        "{}",
-                        serde_json::to_string_pretty(&target)
-                            .expect("publish target should serialize")
-                    ),
-                    OutputFormat::Markdown => {
-                        println!("# Publish Index");
-                        println!();
+                }
+            }
+            match format {
+                OutputFormat::Json => println!(
+                    "{}",
+                    serde_json::to_string_pretty(&targets)
+                        .expect("publish targets should serialize")
+                ),
+                OutputFormat::Markdown => {
+                    println!("# Publish Index");
+                    println!();
+                    for (result, target) in results.iter().zip(targets.iter()) {
                         println!("- Reference: `{}`", result.reference);
                         println!("- Remote store: `{}`", target.display());
                     }
                 }
-                0
             }
-            Err(error) => {
-                eprintln!("failed to package index: {error}");
-                1
-            }
-        },
+            0
+        }
         Err(error) => {
             eprintln!("{error}");
             1
         }
     }
+}
+
+fn normalized_cli_tags(tags: &[String]) -> Vec<String> {
+    let mut normalized = if tags.is_empty() {
+        vec!["latest".to_string()]
+    } else {
+        tags.iter()
+            .map(|tag| tag.trim().to_string())
+            .filter(|tag| !tag.is_empty())
+            .collect::<Vec<_>>()
+    };
+    normalized.sort();
+    normalized.dedup();
+    if normalized.is_empty() {
+        normalized.push("latest".to_string());
+    }
+    normalized
 }
 
 fn run_sync(options: SyncOptions<'_>, format: &str) -> i32 {
@@ -1948,6 +2671,7 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
     let indexes_root = default_indexes_path(&home);
     let remote_config = resolve_remote_config(options)?;
     let mut report = SyncReport {
+        channel: options.channel.map(ToString::to_string),
         public_catalog: Some(remote_config.public_catalog_ref.clone()),
         tenant_catalog: remote_config.tenant_catalog_ref.clone(),
         downloaded: Vec::new(),
@@ -1957,7 +2681,7 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
     };
 
     if let Some(repo) = options.repo {
-        let tag = options.tag.unwrap_or("latest");
+        let tag = options.tag.or(options.channel).unwrap_or("latest");
         let source = remote_root.join(repo_id_path(repo)).join(tag);
         let target = cache_root.join(repo_id_path(repo)).join(tag);
         match remote_config.backend {
@@ -1976,6 +2700,7 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
                     .into_iter()
                     .map(|path| path.display().to_string())
                     .collect();
+                report.channel = sync_report.channel;
                 report.skipped = sync_report.skipped;
                 report.failed = sync_report
                     .failed
@@ -2006,6 +2731,7 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
                 &indexes_root,
                 &home,
                 &gca_oci::SyncCatalogOptions {
+                    channel: options.channel.map(ToString::to_string),
                     tenant: options.tenant.map(ToString::to_string),
                     public_only: options.public_only,
                     private_only: options.private_only,
@@ -2091,6 +2817,9 @@ fn print_sync_report(report: &SyncReport, format: OutputFormat) {
         OutputFormat::Markdown => {
             println!("# Sync");
             println!();
+            if let Some(channel) = &report.channel {
+                println!("- Channel: `{channel}`");
+            }
             println!("- Merged index: `{}`", report.merged_index_path.display());
             if report.downloaded.is_empty() {
                 println!("- No repo packages were synced.");
@@ -2107,6 +2836,129 @@ fn print_sync_report(report: &SyncReport, format: OutputFormat) {
             }
         }
     }
+}
+
+fn run_init(channel: &str, format: &str) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let home = home_dir();
+    let paths = vec![
+        default_remote_store_path(&home),
+        default_sync_cache_path(&home),
+        default_indexes_path(&home),
+        merged_tantivy_path(&home),
+        home.join(".greentic-agent").join("catalogs"),
+        home.join(".greentic-agent").join("notifications"),
+    ];
+    for path in &paths {
+        if let Err(error) = fs::create_dir_all(path) {
+            eprintln!("failed to create {}: {error}", path.display());
+            return 1;
+        }
+    }
+    let config_path = home.join(".greentic-agent").join("config.toml");
+    let public_catalog = format!("ghcr.io/greenticai/indexes/catalog:{channel}");
+    if !config_path.exists() {
+        let raw = format!(
+            "default_channel = \"{}\"\npublic_catalog = \"{}\"\n",
+            channel, public_catalog
+        );
+        if let Err(error) = fs::write(&config_path, raw) {
+            eprintln!("failed to write {}: {error}", config_path.display());
+            return 1;
+        }
+    }
+    let response = serde_json::json!({
+        "home": home.join(".greentic-agent"),
+        "config": config_path,
+        "default_channel": channel,
+        "public_catalog": public_catalog,
+        "paths": paths,
+        "compatibility": "Using ~/.greentic-agent for this compatibility period; ~/.greentic/coding-agent migration is deferred."
+    });
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).expect("init response should serialize")
+            );
+        }
+        OutputFormat::Markdown => {
+            println!("# Init");
+            println!();
+            println!("- Home: `{}`", home.join(".greentic-agent").display());
+            println!("- Config: `{}`", config_path.display());
+            println!("- Default channel: `{channel}`");
+        }
+    }
+    0
+}
+
+fn run_status(channel: Option<&str>, format: &str) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let home = home_dir();
+    let state = gca_oci::load_sync_state(&home).unwrap_or_else(gca_oci::empty_sync_state);
+    let repos = state
+        .repos
+        .iter()
+        .filter(|entry| {
+            channel.is_none_or(|channel| {
+                entry.channel.as_deref() == Some(channel)
+                    || entry.branch.as_deref() == Some(channel)
+            })
+        })
+        .map(|entry| {
+            serde_json::json!({
+                "repo_id": entry.repo_id,
+                "channel": entry.channel,
+                "branch": entry.branch,
+                "commit_sha": entry.source_commit,
+                "indexed_at": entry.indexed_at,
+                "fresh": entry.local_index_path.join("repo-index.json").exists(),
+                "package_ref": entry.package_ref,
+                "local_index_path": entry.local_index_path,
+            })
+        })
+        .collect::<Vec<_>>();
+    let repo_count = repos.len();
+    let selected_channel = channel.unwrap_or("all");
+    let catalog = channel
+        .map(|channel| format!("ghcr.io/greenticai/indexes/catalog:{channel}"))
+        .unwrap_or_else(|| DEFAULT_PUBLIC_CATALOG_REF.to_string());
+    let response = serde_json::json!({
+        "channel": selected_channel,
+        "catalog": catalog,
+        "sync_state_path": sync_state_path(&home),
+        "merged_index_path": merged_tantivy_path(&home),
+        "repos": repos,
+    });
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&response).expect("status response should serialize")
+            );
+        }
+        OutputFormat::Markdown => {
+            println!("# Status");
+            println!();
+            println!("- Channel: `{selected_channel}`");
+            println!("- Catalog: `{catalog}`");
+            println!("- Repos: `{repo_count}`");
+        }
+    }
+    0
 }
 
 fn run_list_remote_repos(format: &str) -> i32 {
@@ -2266,6 +3118,7 @@ fn run_catalog_command(command: CatalogCommands) -> i32 {
         }
         CatalogCommands::Publish {
             tenant,
+            channel,
             expected_digest,
             backend,
             token,
@@ -2273,12 +3126,19 @@ fn run_catalog_command(command: CatalogCommands) -> i32 {
             format,
         } => run_catalog_publish(
             tenant.as_deref(),
+            channel.as_deref(),
             expected_digest.as_deref(),
             &backend,
             token.as_deref(),
             token_env.as_deref(),
             &format,
         ),
+        CatalogCommands::RebuildFromGhcr {
+            org,
+            channel,
+            tenant,
+            format,
+        } => run_catalog_rebuild_from_ghcr(&org, &channel, tenant.as_deref(), &format),
     }
 }
 
@@ -2815,6 +3675,7 @@ fn run_watch_indexes(options: WatchOptions<'_>, format: &str) -> i32 {
                     last_sync_at: Some(timestamp_string()),
                     last_sync_status: "failed".to_string(),
                     changed: false,
+                    notifications: Vec::new(),
                     report: None,
                     error: Some(error),
                 };
@@ -2831,6 +3692,40 @@ fn run_watch_indexes(options: WatchOptions<'_>, format: &str) -> i32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_watch_alias(
+    channel: Option<&str>,
+    poll: &str,
+    tenant: Option<&str>,
+    token: Option<&str>,
+    token_env: Option<&str>,
+    strict_sync: bool,
+    prune_disabled: bool,
+    once: bool,
+    format: &str,
+) -> i32 {
+    let sync_interval_seconds = match parse_poll_interval_seconds(poll) {
+        Ok(seconds) => seconds,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    run_watch_indexes(
+        WatchOptions {
+            channel,
+            tenant,
+            token,
+            token_env,
+            sync_interval_seconds,
+            strict_sync,
+            prune_disabled,
+            once,
+        },
+        format,
+    )
+}
+
 fn start_watch_thread(
     config: ServerConfig,
     _home: PathBuf,
@@ -2838,6 +3733,7 @@ fn start_watch_thread(
 ) {
     thread::spawn(move || {
         let options = WatchOptions {
+            channel: None,
             tenant: config.tenant.as_deref(),
             token: config.token.as_deref(),
             token_env: None,
@@ -2863,6 +3759,7 @@ struct WatchEvent {
     last_sync_at: Option<String>,
     last_sync_status: String,
     changed: bool,
+    notifications: Vec<NotificationItem>,
     report: Option<SyncReport>,
     error: Option<String>,
 }
@@ -2871,10 +3768,13 @@ fn run_watch_tick(
     options: WatchOptions<'_>,
     status: Option<&Arc<RwLock<WatchStatus>>>,
 ) -> Result<WatchEvent, String> {
-    let before = catalog_fingerprint(&home_dir());
+    let home = home_dir();
+    let before = catalog_fingerprint(&home);
+    let before_state = gca_oci::load_sync_state(&home);
     let sync_options = SyncOptions {
         repo: None,
         tag: None,
+        channel: options.channel,
         catalog: None,
         tenant: options.tenant,
         tenant_catalog: None,
@@ -2888,8 +3788,15 @@ fn run_watch_tick(
         prune_disabled: options.prune_disabled,
     };
     let report = execute_sync(sync_options)?;
-    let after = catalog_fingerprint(&home_dir());
+    let after = catalog_fingerprint(&home);
     let changed = before != after || !report.downloaded.is_empty();
+    let after_state = gca_oci::load_sync_state(&home).unwrap_or_else(gca_oci::empty_sync_state);
+    let notifications = append_notification_feed_items(
+        &home,
+        before_state.as_ref(),
+        &after_state,
+        options.channel,
+    )?;
     let event = WatchEvent {
         watch_enabled: true,
         last_sync_at: Some(timestamp_string()),
@@ -2901,6 +3808,7 @@ fn run_watch_tick(
             "warning".to_string()
         },
         changed,
+        notifications,
         report: Some(report),
         error: None,
     };
@@ -2938,11 +3846,210 @@ fn print_watch_event(event: &WatchEvent, format: OutputFormat) {
             if let Some(last_sync_at) = &event.last_sync_at {
                 println!("- Last sync: `{last_sync_at}`");
             }
+            if !event.notifications.is_empty() {
+                println!("- Notifications: `{}`", event.notifications.len());
+            }
             if let Some(error) = &event.error {
                 println!("- Error: {error}");
             }
         }
     }
+}
+
+fn parse_poll_interval_seconds(value: &str) -> Result<u64, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("poll interval cannot be empty".to_string());
+    }
+    let (number, multiplier) = match trimmed.chars().last().unwrap_or_default() {
+        's' | 'S' => (&trimmed[..trimmed.len() - 1], 1),
+        'm' | 'M' => (&trimmed[..trimmed.len() - 1], 60),
+        'h' | 'H' => (&trimmed[..trimmed.len() - 1], 60 * 60),
+        _ => (trimmed, 1),
+    };
+    let amount = number
+        .parse::<u64>()
+        .map_err(|_| format!("unsupported poll interval: {value}"))?;
+    Ok(amount.saturating_mul(multiplier).max(1))
+}
+
+fn notification_dir(home: &Path) -> PathBuf {
+    home.join(".greentic-agent").join("notifications")
+}
+
+fn notification_feed_path(home: &Path) -> PathBuf {
+    notification_dir(home).join("feed.json")
+}
+
+fn notification_seen_path(home: &Path) -> PathBuf {
+    notification_dir(home).join("seen.json")
+}
+
+fn empty_notification_feed() -> NotificationFeed {
+    NotificationFeed {
+        schema_version: "gca.notifications.v1".to_string(),
+        items: Vec::new(),
+    }
+}
+
+fn empty_notification_seen_state() -> NotificationSeenState {
+    NotificationSeenState {
+        schema_version: "gca.notifications.v1".to_string(),
+        seen: BTreeMap::new(),
+    }
+}
+
+fn load_notification_feed(home: &Path) -> NotificationFeed {
+    let path = notification_feed_path(home);
+    let Ok(raw) = fs::read_to_string(path) else {
+        return empty_notification_feed();
+    };
+    serde_json::from_str(&raw).unwrap_or_else(|_| empty_notification_feed())
+}
+
+fn write_notification_feed(home: &Path, feed: &NotificationFeed) -> Result<(), String> {
+    let path = notification_feed_path(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let raw =
+        serde_json::to_string_pretty(feed).expect("notification feed should serialize as json");
+    fs::write(&path, format!("{raw}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn load_notification_seen_state(home: &Path) -> NotificationSeenState {
+    let path = notification_seen_path(home);
+    let Ok(raw) = fs::read_to_string(path) else {
+        return empty_notification_seen_state();
+    };
+    serde_json::from_str(&raw).unwrap_or_else(|_| empty_notification_seen_state())
+}
+
+fn write_notification_seen_state(home: &Path, state: &NotificationSeenState) -> Result<(), String> {
+    let path = notification_seen_path(home);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let raw =
+        serde_json::to_string_pretty(state).expect("notification seen state should serialize");
+    fs::write(&path, format!("{raw}\n"))
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn append_notification_feed_items(
+    home: &Path,
+    before: Option<&gca_oci::SyncState>,
+    after: &gca_oci::SyncState,
+    channel: Option<&str>,
+) -> Result<Vec<NotificationItem>, String> {
+    let mut feed = load_notification_feed(home);
+    let mut existing_ids = feed
+        .items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    let before_by_key = before
+        .map(|state| {
+            state
+                .repos
+                .iter()
+                .map(|entry| (notification_state_key(entry), entry))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let created_at = timestamp_string();
+    let mut added = Vec::new();
+    for entry in &after.repos {
+        if let Some(channel) = channel
+            && !notification_entry_matches_channel(entry, channel)
+        {
+            continue;
+        }
+        let old = before_by_key.get(&notification_state_key(entry)).copied();
+        let old_marker = old.and_then(notification_commit_marker);
+        let new_marker = notification_commit_marker(entry);
+        if old.is_some() && old_marker == new_marker {
+            continue;
+        }
+        let branch = notification_entry_branch(entry);
+        let id_marker = new_marker.clone().unwrap_or_else(|| {
+            entry
+                .digest
+                .clone()
+                .unwrap_or_else(|| entry.downloaded_at.clone())
+        });
+        let id = format!("{}/{}/{}", entry.repo_id, branch, id_marker);
+        if existing_ids.iter().any(|existing| existing == &id) {
+            continue;
+        }
+        let repo_name = entry.repo_id.rsplit('/').next().unwrap_or(&entry.repo_id);
+        let item = NotificationItem {
+            id: id.clone(),
+            repo_id: entry.repo_id.clone(),
+            branch: branch.clone(),
+            item_type: "index_updated".to_string(),
+            title: format!("{repo_name} {branch} index updated"),
+            old_commit: old_marker,
+            new_commit: new_marker,
+            created_at: created_at.clone(),
+            agent_impact: format!(
+                "Review updated guidance for `{}` on `{}` before editing.",
+                entry.repo_id, branch
+            ),
+        };
+        existing_ids.push(id);
+        feed.items.push(item.clone());
+        added.push(item);
+    }
+    feed.items.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then(left.repo_id.cmp(&right.repo_id))
+            .then(left.id.cmp(&right.id))
+    });
+    write_notification_feed(home, &feed)?;
+    Ok(added)
+}
+
+fn notification_state_key(entry: &gca_oci::SyncedRepoState) -> String {
+    format!(
+        "{}|{}|{}",
+        entry.repo_id,
+        entry.tenant.as_deref().unwrap_or("public"),
+        notification_entry_branch(entry)
+    )
+}
+
+fn notification_entry_branch(entry: &gca_oci::SyncedRepoState) -> String {
+    entry
+        .branch
+        .clone()
+        .or_else(|| entry.channel.clone())
+        .or_else(|| {
+            entry
+                .package_ref
+                .rsplit_once(':')
+                .map(|(_, tag)| tag.to_string())
+        })
+        .unwrap_or_else(|| "latest".to_string())
+}
+
+fn notification_entry_matches_channel(entry: &gca_oci::SyncedRepoState, channel: &str) -> bool {
+    entry.channel.as_deref() == Some(channel)
+        || entry.branch.as_deref() == Some(channel)
+        || entry.package_ref.ends_with(&format!(":{channel}"))
+}
+
+fn notification_commit_marker(entry: &gca_oci::SyncedRepoState) -> Option<String> {
+    entry
+        .source_commit
+        .clone()
+        .or_else(|| entry.digest.clone())
+        .or_else(|| entry.indexed_at.clone())
 }
 
 #[derive(Clone)]
@@ -3056,6 +4163,8 @@ impl QueryService {
             load_editable_catalog(self.config.tenant.as_deref()).unwrap_or(Catalog {
                 version: SCHEMA_VERSION_V1.to_string(),
                 generated_at: timestamp_string(),
+                catalog_id: None,
+                default_channel: None,
                 repos: Vec::new(),
                 change_log: Vec::new(),
             }),
@@ -3066,6 +4175,7 @@ impl QueryService {
     fn sync_indexes(&self) -> Result<serde_json::Value, String> {
         let event = run_watch_tick(
             WatchOptions {
+                channel: None,
                 tenant: self.config.tenant.as_deref(),
                 token: self.config.token.as_deref(),
                 token_env: None,
@@ -3338,6 +4448,9 @@ fn run_catalog_add_repo(options: CatalogAddOptions<'_>) -> i32 {
         latest_tag: tag_from_index_uri(options.index_uri),
         package_ref: options.index_uri.to_string(),
         updated_at: timestamp_string(),
+        default_branch: None,
+        preferred_branch: None,
+        branches: BTreeMap::new(),
         visibility: if options.tenant.is_some() {
             IndexVisibility::Tenant
         } else {
@@ -3357,6 +4470,7 @@ fn run_catalog_add_repo(options: CatalogAddOptions<'_>) -> i32 {
     if options.publish {
         let status = run_catalog_publish(
             options.tenant,
+            None,
             None,
             options.backend,
             options.token,
@@ -3462,8 +4576,45 @@ fn run_catalog_validate(tenant: Option<&str>, format: &str) -> i32 {
     0
 }
 
+fn run_catalog_rebuild_from_ghcr(
+    org: &str,
+    channel: &str,
+    tenant: Option<&str>,
+    format: &str,
+) -> i32 {
+    let format = match OutputFormat::parse(format) {
+        Ok(format) => format,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let remote_root = default_remote_store_path(&home_dir());
+    let mut catalog = match rebuild_catalog_from_remote(&remote_root, org, channel, tenant) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("{error}");
+            return 1;
+        }
+    };
+    catalog_change(
+        &mut catalog,
+        CatalogAction::AddRepo,
+        "catalog",
+        tenant,
+        Some("rebuilt from published index packages"),
+    );
+    if let Err(error) = write_editable_catalog(tenant, &catalog) {
+        eprintln!("{error}");
+        return 1;
+    }
+    print_catalog(&catalog, format);
+    0
+}
+
 fn run_catalog_publish(
     tenant: Option<&str>,
+    channel: Option<&str>,
     expected_digest: Option<&str>,
     backend: &str,
     token: Option<&str>,
@@ -3484,6 +4635,9 @@ fn run_catalog_publish(
             return 1;
         }
     };
+    if let Some(channel) = channel {
+        catalog.default_channel = Some(channel.to_string());
+    }
     catalog_change(
         &mut catalog,
         CatalogAction::Publish,
@@ -3500,6 +4654,7 @@ fn run_catalog_publish(
     let remote_config = match resolve_remote_config(SyncOptions {
         repo: None,
         tag: None,
+        channel,
         catalog: None,
         tenant,
         tenant_catalog: None,
@@ -3522,7 +4677,7 @@ fn run_catalog_publish(
     let catalog_path = editable_catalog_path(tenant);
     let target = match remote_config.backend {
         RemoteBackendKind::LocalFixture => {
-            let target = published_catalog_path(tenant);
+            let target = published_catalog_path(tenant, channel);
             if let Some(expected_digest) = expected_digest
                 && target.exists()
             {
@@ -3550,11 +4705,26 @@ fn run_catalog_publish(
                 eprintln!("failed to publish catalog: {error}");
                 return 1;
             }
+            if channel.is_some() {
+                let compatibility_target = published_catalog_path(tenant, None);
+                if let Some(parent) = compatibility_target.parent()
+                    && let Err(error) = fs::create_dir_all(parent)
+                {
+                    eprintln!("failed to create catalog publish directory: {error}");
+                    return 1;
+                }
+                if let Err(error) = fs::copy(&catalog_path, &compatibility_target) {
+                    eprintln!("failed to publish compatibility catalog: {error}");
+                    return 1;
+                }
+            }
             target
         }
         RemoteBackendKind::GhcrOras => {
             let reference = if let Some(tenant) = tenant {
                 default_tenant_catalog_ref(tenant)
+            } else if let Some(channel) = channel {
+                format!("ghcr.io/greenticai/indexes/catalog:{channel}")
             } else {
                 DEFAULT_PUBLIC_CATALOG_REF.to_string()
             };
@@ -3591,6 +4761,8 @@ fn load_editable_catalog(tenant: Option<&str>) -> Result<Catalog, String> {
         return Ok(Catalog {
             version: SCHEMA_VERSION_V1.to_string(),
             generated_at: timestamp_string(),
+            catalog_id: None,
+            default_channel: None,
             repos: Vec::new(),
             change_log: Vec::new(),
         });
@@ -3786,11 +4958,17 @@ fn editable_catalog_path(tenant: Option<&str>) -> PathBuf {
     }
 }
 
-fn published_catalog_path(tenant: Option<&str>) -> PathBuf {
+fn published_catalog_path(tenant: Option<&str>, channel: Option<&str>) -> PathBuf {
     let root = default_remote_store_path(&home_dir()).join("catalogs");
-    match tenant {
-        Some(tenant) => root.join("tenants").join(tenant).join("catalog.json"),
-        None => root.join("public").join("catalog.json"),
+    match (tenant, channel) {
+        (Some(tenant), Some(channel)) => root
+            .join("tenants")
+            .join(tenant)
+            .join(channel)
+            .join("catalog.json"),
+        (Some(tenant), None) => root.join("tenants").join(tenant).join("catalog.json"),
+        (None, Some(channel)) => root.join("public").join(channel).join("catalog.json"),
+        (None, None) => root.join("public").join("catalog.json"),
     }
 }
 
@@ -4907,6 +6085,7 @@ struct RemoteConfig {
 struct SyncOptions<'a> {
     repo: Option<&'a str>,
     tag: Option<&'a str>,
+    channel: Option<&'a str>,
     catalog: Option<&'a str>,
     tenant: Option<&'a str>,
     tenant_catalog: Option<&'a str>,
@@ -4951,6 +6130,7 @@ struct ServerConfigInput<'a> {
 
 #[derive(Debug, Clone, Copy)]
 struct WatchOptions<'a> {
+    channel: Option<&'a str>,
     tenant: Option<&'a str>,
     token: Option<&'a str>,
     token_env: Option<&'a str>,
@@ -5085,6 +6265,7 @@ enum KnowledgeScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LifecyclePhase {
+    Design,
     Build,
     Setup,
     Start,
@@ -5115,6 +6296,8 @@ struct RepoIndex {
     repo_name: String,
     repo_role: RepoRole,
     generated_at: String,
+    #[serde(default)]
+    metadata: Option<RepoIndexMetadata>,
     freshness: FreshnessStatus,
     manifest: RepoAgentManifest,
     concept_graph: Vec<ConceptDescriptor>,
@@ -5128,6 +6311,22 @@ struct RepoIndex {
     instruction_graph: Vec<InstructionDescriptor>,
     instruction_paths: Vec<String>,
     source_stats: SourceStats,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RepoIndexMetadata {
+    repo_id: String,
+    #[serde(default)]
+    branch: Option<String>,
+    #[serde(default)]
+    commit_sha: Option<String>,
+    #[serde(default)]
+    commit_time: Option<String>,
+    indexed_at: String,
+    index_schema_version: String,
+    tool_version: String,
+    #[serde(default)]
+    source_tree_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5194,6 +6393,52 @@ struct SearchResponse {
     mode: SearchMode,
     query: String,
     results: Vec<SearchResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AgentContextResponse {
+    task: String,
+    channel: String,
+    relevant_repos: Vec<AgentRepoCandidate>,
+    owner_candidates: Vec<OwnerLookup>,
+    required_validations: Vec<ValidationDescriptor>,
+    recent_updates: Vec<KnowledgeUpdateDescriptor>,
+    tutorials: Vec<TrainingCourseDescriptor>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct AgentRepoCandidate {
+    repo_id: String,
+    branch: Option<String>,
+    source: String,
+    matched: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct NotificationFeed {
+    schema_version: String,
+    items: Vec<NotificationItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct NotificationItem {
+    id: String,
+    repo_id: String,
+    branch: String,
+    #[serde(rename = "type")]
+    item_type: String,
+    title: String,
+    old_commit: Option<String>,
+    new_commit: Option<String>,
+    created_at: String,
+    agent_impact: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct NotificationSeenState {
+    schema_version: String,
+    seen: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5413,10 +6658,20 @@ struct CatalogRepo {
     repo_id: String,
     #[serde(default)]
     repo_name: String,
+    #[serde(alias = "role", default = "default_repo_role")]
     repo_role: RepoRole,
+    #[serde(default = "default_latest_tag")]
     latest_tag: String,
+    #[serde(default)]
     package_ref: String,
+    #[serde(default)]
     updated_at: String,
+    #[serde(default)]
+    default_branch: Option<String>,
+    #[serde(default)]
+    preferred_branch: Option<String>,
+    #[serde(default)]
+    branches: BTreeMap<String, CatalogBranchEntry>,
     #[serde(default)]
     visibility: IndexVisibility,
     #[serde(default)]
@@ -5429,6 +6684,17 @@ struct CatalogRepo {
     source_commit: Option<String>,
     #[serde(default = "default_enabled")]
     enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CatalogBranchEntry {
+    index_uri: String,
+    #[serde(default)]
+    commit_sha: Option<String>,
+    #[serde(default)]
+    updated_at: Option<String>,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -5459,8 +6725,13 @@ enum AuthKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Catalog {
+    #[serde(alias = "schema_version")]
     version: String,
     generated_at: String,
+    #[serde(default)]
+    catalog_id: Option<String>,
+    #[serde(default)]
+    default_channel: Option<String>,
     repos: Vec<CatalogRepo>,
     #[serde(default)]
     change_log: Vec<CatalogChange>,
@@ -5508,6 +6779,7 @@ struct SyncedRepoState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct SyncReport {
+    channel: Option<String>,
     public_catalog: Option<String>,
     tenant_catalog: Option<String>,
     downloaded: Vec<String>,
@@ -5716,6 +6988,14 @@ fn default_enabled() -> bool {
     true
 }
 
+fn default_repo_role() -> RepoRole {
+    RepoRole::DemoApp
+}
+
+fn default_latest_tag() -> String {
+    "latest".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct AnalyzeOutputs {
     manifest: RepoAgentManifest,
@@ -5836,22 +7116,24 @@ fn command_catalog() -> Vec<CommandCatalogEntry> {
             when_to_use: "When finishing work and deciding what checks must run.".to_string(),
         },
         CommandCatalogEntry {
-            command: "greentic-coding-agent package-index --tag <tag>".to_string(),
+            command: "greentic-coding-agent package-index --tag <branch> --tag sha-<commit>"
+                .to_string(),
             purpose:
                 "Build a local OCI-style package for the current repo index and generated agent docs."
                     .to_string(),
             phase: LifecyclePhase::Build,
-            inputs: vec!["Tag".to_string()],
+            inputs: vec!["One or more tags".to_string()],
             outputs: vec![".greentic-agent/oci/<repo>/<tag>".to_string()],
             when_to_use:
                 "Before publishing or inspecting a distributable repo index artifact.".to_string(),
         },
         CommandCatalogEntry {
-            command: "greentic-coding-agent publish-index --tag <tag>".to_string(),
+            command: "greentic-coding-agent publish-index --tag <branch> --tag sha-<commit>"
+                .to_string(),
             purpose: "Publish the local OCI-style package into the configured remote store."
                 .to_string(),
             phase: LifecyclePhase::Build,
-            inputs: vec!["Tag".to_string()],
+            inputs: vec!["One or more tags".to_string()],
             outputs: vec!["~/.greentic-agent/remote-oci/<repo>/<tag>".to_string()],
             when_to_use:
                 "When sharing a packaged repo index for later sync or inspection.".to_string(),
@@ -5863,6 +7145,19 @@ fn command_catalog() -> Vec<CommandCatalogEntry> {
             inputs: vec!["Repo name".to_string(), "Tag".to_string()],
             outputs: vec!["~/.greentic-agent/cache-oci/<repo>/<tag>".to_string()],
             when_to_use: "When pulling a packaged repo index into the local machine cache."
+                .to_string(),
+        },
+        CommandCatalogEntry {
+            command: "greentic-coding-agent watch --channel <branch> --poll 10m".to_string(),
+            purpose: "Keep the global cache current and append org notification feed items when synced indexes change."
+                .to_string(),
+            phase: LifecyclePhase::Build,
+            inputs: vec!["Channel".to_string(), "Poll interval".to_string()],
+            outputs: vec![
+                "~/.greentic-agent/sync-state.json".to_string(),
+                "~/.greentic-agent/notifications/feed.json".to_string(),
+            ],
+            when_to_use: "When a developer or agent host should keep merged Greentic knowledge fresh."
                 .to_string(),
         },
         CommandCatalogEntry {
@@ -6264,7 +7559,12 @@ fn resolve_remote_config(options: SyncOptions<'_>) -> Result<RemoteConfig, Strin
         .catalog
         .map(ToString::to_string)
         .or_else(|| env::var("GREENTIC_AGENT_CATALOG").ok())
-        .unwrap_or_else(|| DEFAULT_PUBLIC_CATALOG_REF.to_string());
+        .unwrap_or_else(|| {
+            options
+                .channel
+                .map(|channel| format!("ghcr.io/greenticai/indexes/catalog:{channel}"))
+                .unwrap_or_else(|| DEFAULT_PUBLIC_CATALOG_REF.to_string())
+        });
     let tenant_catalog_ref = options
         .tenant_catalog
         .map(ToString::to_string)
@@ -6330,7 +7630,7 @@ fn build_catalog(remote_root: &Path) -> Result<Catalog, std::io::Error> {
                 .join("repo-index.json"),
         )?;
         catalog_repos.push(CatalogRepo {
-            repo_id: repo.repo_id,
+            repo_id: repo.repo_id.clone(),
             repo_name: repo.repo_name,
             repo_role: repo_index.repo_role,
             latest_tag: latest_tag.clone(),
@@ -6338,7 +7638,13 @@ fn build_catalog(remote_root: &Path) -> Result<Catalog, std::io::Error> {
                 "ghcr.io/greenticai/indexes/{}:{}",
                 repo_index.repo_id, latest_tag
             ),
-            updated_at: repo_index.generated_at,
+            updated_at: repo_index.generated_at.clone(),
+            default_branch: repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone()),
+            preferred_branch: None,
+            branches: catalog_branches_for_repo_index(&repo_index, &repo.repo_id, &latest_tag),
             visibility: IndexVisibility::Public,
             tenant: None,
             required_auth: None,
@@ -6351,6 +7657,116 @@ fn build_catalog(remote_root: &Path) -> Result<Catalog, std::io::Error> {
     Ok(Catalog {
         version: SCHEMA_VERSION_V1.to_string(),
         generated_at: timestamp_string(),
+        catalog_id: None,
+        default_channel: None,
+        repos: catalog_repos,
+        change_log: Vec::new(),
+    })
+}
+
+fn rebuild_catalog_from_remote(
+    remote_root: &Path,
+    org: &str,
+    channel: &str,
+    tenant: Option<&str>,
+) -> Result<Catalog, String> {
+    let repos = list_remote_repos(remote_root).map_err(|error| error.to_string())?;
+    let mut catalog_repos = Vec::new();
+    for repo in repos
+        .into_iter()
+        .filter(|repo| repo.repo_id.starts_with(&format!("{org}/")))
+    {
+        let mut branch_entries = BTreeMap::new();
+        let mut loaded = BTreeMap::<String, (String, RepoIndex, Option<String>)>::new();
+        for tag in &repo.tags {
+            let package_index_path = remote_root
+                .join(repo_id_path(&repo.repo_id))
+                .join(tag)
+                .join("artifacts")
+                .join("repo-index.json");
+            if !package_index_path.exists() {
+                continue;
+            }
+            let repo_index = load_repo_index_from_path(&package_index_path)
+                .map_err(|error| error.to_string())?;
+            let branch = repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone())
+                .unwrap_or_else(|| tag.clone());
+            let digest = file_digest_hex(&package_index_path).ok();
+            branch_entries.insert(
+                branch.clone(),
+                CatalogBranchEntry {
+                    index_uri: format!("ghcr.io/greenticai/indexes/{}:{tag}", repo.repo_id),
+                    commit_sha: repo_index
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.commit_sha.clone()),
+                    updated_at: Some(repo_index.generated_at.clone()),
+                    digest: digest.clone(),
+                },
+            );
+            loaded.insert(branch, (tag.clone(), repo_index, digest));
+        }
+        if loaded.is_empty() {
+            continue;
+        }
+        let selected_branch = if loaded.contains_key(channel) {
+            channel.to_string()
+        } else if loaded.contains_key("develop") {
+            "develop".to_string()
+        } else if loaded.contains_key("main") {
+            "main".to_string()
+        } else {
+            loaded
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_else(|| channel.to_string())
+        };
+        let Some((selected_tag, selected_index, selected_digest)) = loaded.get(&selected_branch)
+        else {
+            continue;
+        };
+        catalog_repos.push(CatalogRepo {
+            repo_id: selected_index.repo_id.clone(),
+            repo_name: selected_index.repo_name.clone(),
+            repo_role: selected_index.repo_role,
+            latest_tag: selected_tag.clone(),
+            package_ref: format!(
+                "ghcr.io/greenticai/indexes/{}:{}",
+                selected_index.repo_id, selected_tag
+            ),
+            updated_at: selected_index.generated_at.clone(),
+            default_branch: Some("main".to_string()).filter(|branch| loaded.contains_key(branch)),
+            preferred_branch: Some(selected_branch),
+            branches: branch_entries,
+            visibility: if tenant.is_some() {
+                IndexVisibility::Tenant
+            } else {
+                IndexVisibility::Public
+            },
+            tenant: tenant.map(ToString::to_string),
+            required_auth: tenant.map(|_| AuthKind::GhcrToken),
+            digest: selected_digest.clone(),
+            source_commit: selected_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.commit_sha.clone()),
+            enabled: true,
+        });
+    }
+    catalog_repos.sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
+    Ok(Catalog {
+        version: "gca.catalog.v2".to_string(),
+        generated_at: timestamp_string(),
+        catalog_id: Some(
+            tenant
+                .map(|tenant| format!("{org}/{tenant}"))
+                .unwrap_or_else(|| format!("{org}/public")),
+        ),
+        default_channel: Some(channel.to_string()),
         repos: catalog_repos,
         change_log: Vec::new(),
     })
@@ -6384,6 +7800,7 @@ fn sync_catalog_with_state(
     };
     let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
     let mut report = SyncReport {
+        channel: options.channel.map(ToString::to_string),
         public_catalog: Some(DEFAULT_PUBLIC_CATALOG_REF.to_string()),
         tenant_catalog: options.tenant.map(default_tenant_catalog_ref),
         downloaded: Vec::new(),
@@ -6489,6 +7906,12 @@ fn catalog_repo_from_package(
         latest_tag: tag.to_string(),
         package_ref: format!("ghcr.io/greenticai/indexes/{requested_repo}:{tag}"),
         updated_at: repo_index.generated_at.clone(),
+        default_branch: repo_index
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.branch.clone()),
+        preferred_branch: None,
+        branches: catalog_branches_for_repo_index(&repo_index, requested_repo, tag),
         visibility: if tenant.is_some() {
             IndexVisibility::Tenant
         } else {
@@ -6500,6 +7923,32 @@ fn catalog_repo_from_package(
         source_commit: None,
         enabled: true,
     })
+}
+
+fn catalog_branches_for_repo_index(
+    repo_index: &RepoIndex,
+    requested_repo: &str,
+    tag: &str,
+) -> BTreeMap<String, CatalogBranchEntry> {
+    let branch = repo_index
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.branch.clone())
+        .unwrap_or_else(|| tag.to_string());
+    let mut branches = BTreeMap::new();
+    branches.insert(
+        branch,
+        CatalogBranchEntry {
+            index_uri: format!("ghcr.io/greenticai/indexes/{requested_repo}:{tag}"),
+            commit_sha: repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.commit_sha.clone()),
+            updated_at: Some(repo_index.generated_at.clone()),
+            digest: None,
+        },
+    );
+    branches
 }
 
 fn sync_cached_index_from_package(
@@ -6870,9 +8319,9 @@ fn render_installed_github_workflow(options: WorkflowInstallOptions<'_>) -> Stri
 
 on:
   push:
-    branches: [main, master]
-  schedule:
-    - cron: "17 2 * * *"
+    branches:
+      - main
+      - develop
   workflow_dispatch:
 
 permissions:
@@ -6887,6 +8336,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -6907,13 +8358,13 @@ jobs:
         run: ./target/release/greentic-coding-agent search --engine auto --mode concept greentic --format json
 
       - name: Package index
-        run: ./target/release/greentic-coding-agent package-index --tag latest --format json | tee .greentic-agent-package.json
+        run: ./target/release/greentic-coding-agent package-index --tag "${{{{ github.ref_name }}}}" --tag "sha-${{{{ github.sha }}}}" --format json | tee .greentic-agent-package.json
 
       - name: Publish index to GHCR when refresh is needed
         shell: bash
         run: |
           if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
-            ./target/release/greentic-coding-agent publish-index --tag latest --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
+            ./target/release/greentic-coding-agent publish-index --tag "${{{{ github.ref_name }}}}" --tag "sha-${{{{ github.sha }}}}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
           else
             echo '{{"published": false, "reason": "refresh not required"}}' | tee .greentic-agent-publish.json
           fi
@@ -6953,7 +8404,7 @@ fn render_installed_catalog_workflow(kind: &str, tenant: Option<&str>) -> String
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, develop]
     paths:
       - ".greentic-agent/catalogs/**"
       - ".github/workflows/greentic-agent-catalog.yml"
@@ -6986,7 +8437,7 @@ jobs:
         run: ./target/release/greentic-coding-agent catalog validate{tenant_flag} --format json | tee .greentic-agent-catalog-validate.json
 
       - name: Publish {kind} catalog to GHCR
-        run: ./target/release/greentic-coding-agent catalog publish{tenant_flag} --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-catalog-publish.json
+        run: ./target/release/greentic-coding-agent catalog publish{tenant_flag} --channel "${{{{ github.ref_name }}}}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-catalog-publish.json
 
       - name: Upload catalog summaries
         uses: actions/upload-artifact@v4
@@ -7423,6 +8874,7 @@ fn simple_tantivy_document(kind: &str, value: &str, provenance: &str) -> Tantivy
 
 fn phase_label(phase: &LifecyclePhase) -> &'static str {
     match phase {
+        LifecyclePhase::Design => "design",
         LifecyclePhase::Build => "build",
         LifecyclePhase::Setup => "setup",
         LifecyclePhase::Start => "start",
@@ -7978,6 +9430,15 @@ fn mcp_server_snapshot(refresh: Option<&RefreshCheck>) -> McpServerSnapshot {
                 "show_catalog",
                 "Show the configured public or tenant catalog.",
             ),
+            mcp_tool("gca.search", "Search global merged and local indexes."),
+            mcp_tool("gca.agent_context", "Build task context for an agent."),
+            mcp_tool("gca.find_owner", "Find owner candidates for a concept."),
+            mcp_tool(
+                "gca.required_validations",
+                "List validations implied by a task.",
+            ),
+            mcp_tool("gca.recent_updates", "Find recent updates for a task."),
+            mcp_tool("gca.branch_status", "Report synced branch/channel status."),
         ],
         resources: vec![
             "greentic://repo/current/manifest".to_string(),
@@ -8029,6 +9490,43 @@ fn dispatch_mcp_request(service: &QueryService, request: McpRequest) -> McpRespo
             .map_err(|error| error.to_string())
         }
         "search_code" => dispatch_service_search(service, SearchMode::Code, &arguments),
+        "gca.search" => {
+            let Some(query) = arguments.get("query").and_then(serde_json::Value::as_str) else {
+                return mcp_error(id, "missing `query` argument");
+            };
+            let mode = match arguments
+                .get("mode")
+                .and_then(serde_json::Value::as_str)
+                .map(SearchMode::parse)
+                .transpose()
+            {
+                Ok(mode) => mode.unwrap_or(SearchMode::Instruction),
+                Err(error) => return mcp_error(id, &error),
+            };
+            let scope = match arguments
+                .get("scope")
+                .and_then(serde_json::Value::as_str)
+                .map(SearchScope::parse)
+                .transpose()
+            {
+                Ok(scope) => scope.unwrap_or(SearchScope::All),
+                Err(error) => return mcp_error(id, &error),
+            };
+            service
+                .search(
+                    mode,
+                    query,
+                    scope,
+                    arguments.get("repo").and_then(serde_json::Value::as_str),
+                    arguments
+                        .get("tenant")
+                        .and_then(serde_json::Value::as_str)
+                        .or(service.config.tenant.as_deref()),
+                )
+                .and_then(|response| {
+                    serde_json::to_value(response).map_err(|error| error.to_string())
+                })
+        }
         "search_instructions" => {
             dispatch_service_search(service, SearchMode::Instruction, &arguments)
         }
@@ -8046,6 +9544,46 @@ fn dispatch_mcp_request(service: &QueryService, request: McpRequest) -> McpRespo
             };
             serde_json::to_value(locate_owner(&repo_index.reuse, concept_id))
                 .map_err(|error| error.to_string())
+        }
+        "gca.agent_context" => {
+            let Some(task) = arguments.get("task").and_then(serde_json::Value::as_str) else {
+                return mcp_error(id, "missing `task` argument");
+            };
+            serde_json::to_value(build_agent_context(
+                task,
+                arguments.get("channel").and_then(serde_json::Value::as_str),
+                arguments
+                    .get("tenant")
+                    .and_then(serde_json::Value::as_str)
+                    .or(service.config.tenant.as_deref()),
+                arguments.get("repo").and_then(serde_json::Value::as_str),
+            ))
+            .map_err(|error| error.to_string())
+        }
+        "gca.find_owner" => {
+            let Some(concept) = arguments
+                .get("concept")
+                .or_else(|| arguments.get("concept_id"))
+                .and_then(serde_json::Value::as_str)
+            else {
+                return mcp_error(id, "missing `concept` argument");
+            };
+            let response = build_agent_context(
+                concept,
+                arguments.get("channel").and_then(serde_json::Value::as_str),
+                arguments
+                    .get("tenant")
+                    .and_then(serde_json::Value::as_str)
+                    .or(service.config.tenant.as_deref()),
+                None,
+            );
+            serde_json::to_value(serde_json::json!({
+                "concept": concept,
+                "channel": response.channel,
+                "owner_candidates": response.owner_candidates,
+                "warnings": response.warnings,
+            }))
+            .map_err(|error| error.to_string())
         }
         "locate_extension_point" => {
             let query = arguments
@@ -8074,6 +9612,48 @@ fn dispatch_mcp_request(service: &QueryService, request: McpRequest) -> McpRespo
             };
             serde_json::to_value(required_validations(repo_index, task))
                 .map_err(|error| error.to_string())
+        }
+        "gca.required_validations" => {
+            let Some(task) = arguments.get("task").and_then(serde_json::Value::as_str) else {
+                return mcp_error(id, "missing `task` argument");
+            };
+            let response = build_agent_context(
+                task,
+                arguments.get("channel").and_then(serde_json::Value::as_str),
+                arguments
+                    .get("tenant")
+                    .and_then(serde_json::Value::as_str)
+                    .or(service.config.tenant.as_deref()),
+                None,
+            );
+            serde_json::to_value(serde_json::json!({
+                "task": task,
+                "channel": response.channel,
+                "validations": response.required_validations,
+                "warnings": response.warnings,
+            }))
+            .map_err(|error| error.to_string())
+        }
+        "gca.recent_updates" => {
+            let Some(task) = arguments.get("task").and_then(serde_json::Value::as_str) else {
+                return mcp_error(id, "missing `task` argument");
+            };
+            let response = build_agent_context(
+                task,
+                arguments.get("channel").and_then(serde_json::Value::as_str),
+                arguments
+                    .get("tenant")
+                    .and_then(serde_json::Value::as_str)
+                    .or(service.config.tenant.as_deref()),
+                None,
+            );
+            serde_json::to_value(serde_json::json!({
+                "task": task,
+                "channel": response.channel,
+                "updates": response.recent_updates,
+                "warnings": response.warnings,
+            }))
+            .map_err(|error| error.to_string())
         }
         "impact_analysis" => {
             let Some(repo_index) = repo_index else {
@@ -8126,6 +9706,7 @@ fn dispatch_mcp_request(service: &QueryService, request: McpRequest) -> McpRespo
         "list_indexed_repos" | "list_remote_repos" => Ok(service.indexed_repos()),
         "sync_indexes" => service.sync_indexes(),
         "show_catalog" => Ok(service.catalog()),
+        "gca.branch_status" => Ok(service.status()),
         other => return mcp_error(id, &format!("unknown tool: {other}")),
     };
 
@@ -8602,6 +10183,16 @@ fn analyze_repo(start_dir: &Path, registry_path: &Path) -> Result<AnalyzeOutputs
         repo_name: repo_name.clone(),
         repo_role,
         generated_at: generated_at.clone(),
+        metadata: Some(RepoIndexMetadata {
+            repo_id: repo_id.clone(),
+            branch: default_branch.clone(),
+            commit_sha: Some(head_sha.clone()),
+            commit_time: None,
+            indexed_at: generated_at.clone(),
+            index_schema_version: "gca.repo_index.v1".to_string(),
+            tool_version: env!("CARGO_PKG_VERSION").to_string(),
+            source_tree_hash: Some(source_tree_hash(&tracked_files)),
+        }),
         freshness: FreshnessStatus::Fresh,
         manifest: manifest.clone(),
         concept_graph,
@@ -8798,6 +10389,11 @@ fn default_registry_path(home_dir: &Path) -> PathBuf {
 fn detect_repo_id(repo_root: &Path, repo_name: &str) -> String {
     read_origin_url(repo_root)
         .and_then(|url| parse_github_remote_url(&url))
+        .or_else(|| {
+            env::var("GITHUB_REPOSITORY")
+                .ok()
+                .filter(|repository| parse_repo_id(repository).is_some())
+        })
         .unwrap_or_else(|| format!("unknown/{repo_name}"))
 }
 
@@ -8860,7 +10456,13 @@ fn read_head_sha(repo_root: &Path) -> Option<String> {
             .map(|value| value.trim().to_string());
     }
 
-    Some(head.to_string())
+    if !head.is_empty() {
+        return Some(head.to_string());
+    }
+
+    env::var("GITHUB_SHA")
+        .ok()
+        .filter(|sha| !sha.trim().is_empty())
 }
 
 fn read_default_branch(repo_root: &Path) -> Option<String> {
@@ -8868,6 +10470,11 @@ fn read_default_branch(repo_root: &Path) -> Option<String> {
     head.trim()
         .strip_prefix("ref: refs/heads/")
         .map(|branch| branch.to_string())
+        .or_else(|| {
+            env::var("GITHUB_REF_NAME")
+                .ok()
+                .filter(|branch| !branch.trim().is_empty())
+        })
 }
 
 fn find_candidate_docs(repo_root: &Path) -> Vec<String> {
@@ -8899,6 +10506,19 @@ fn find_tracked_files(repo_root: &Path) -> Vec<String> {
     gather_regular_files(repo_root, repo_root, &mut files);
     dedup_sorted(&mut files);
     files
+}
+
+fn source_tree_hash(tracked_files: &[String]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for file in tracked_files {
+        for byte in file.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= u64::from(b'\n');
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
 }
 
 fn build_source_stats(repo_root: &Path, cargo_manifests: &[String]) -> SourceStats {

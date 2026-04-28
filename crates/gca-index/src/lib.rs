@@ -5,8 +5,8 @@ use extract::cargo_metadata::extract_cargo_metadata;
 use extract::rust_symbols::extract_rust_symbols;
 use gca_core::{
     FreshnessStatus, InstructionDescriptor, KnowledgeUpdateDescriptor, RegistryEntry,
-    RepoAgentManifest, RepoId, RepoIndex, SourceStats, TrainingCourseDescriptor, builtin_concepts,
-    load_registry, write_registry,
+    RepoAgentManifest, RepoId, RepoIndex, RepoIndexMetadata, SourceStats, TrainingCourseDescriptor,
+    builtin_concepts, load_registry, write_registry,
 };
 use gca_greentic::{
     EnrichmentInput, infer_concepts, infer_repo_role, infer_workflows, known_command_matches,
@@ -160,6 +160,16 @@ pub fn analyze_repo(
         repo_name: repo_name.clone(),
         repo_role,
         generated_at: generated_at.clone(),
+        metadata: Some(RepoIndexMetadata {
+            repo_id: repo_id.clone(),
+            branch: default_branch.clone(),
+            commit_sha: Some(head_sha.clone()),
+            commit_time: None,
+            indexed_at: generated_at.clone(),
+            index_schema_version: "gca.repo_index.v1".to_string(),
+            tool_version: env!("CARGO_PKG_VERSION").to_string(),
+            source_tree_hash: Some(source_tree_hash(&tracked_files)),
+        }),
         freshness: FreshnessStatus::Fresh,
         manifest: manifest.clone(),
         concept_graph,
@@ -255,6 +265,11 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
 pub fn detect_repo_id(repo_root: &Path, repo_name: &str) -> String {
     read_origin_url(repo_root)
         .and_then(|url| parse_github_remote_url(&url))
+        .or_else(|| {
+            std::env::var("GITHUB_REPOSITORY")
+                .ok()
+                .filter(|repository| RepoId::parse(repository).is_ok())
+        })
         .unwrap_or_else(|| format!("unknown/{repo_name}"))
 }
 
@@ -299,7 +314,13 @@ fn read_head_sha(repo_root: &Path) -> Option<String> {
             .map(|value| value.trim().to_string());
     }
 
-    Some(head.to_string())
+    if !head.is_empty() {
+        return Some(head.to_string());
+    }
+
+    std::env::var("GITHUB_SHA")
+        .ok()
+        .filter(|sha| !sha.trim().is_empty())
 }
 
 fn read_default_branch(repo_root: &Path) -> Option<String> {
@@ -307,6 +328,11 @@ fn read_default_branch(repo_root: &Path) -> Option<String> {
     let head = head.trim();
     head.strip_prefix("ref: refs/heads/")
         .map(|branch| branch.to_string())
+        .or_else(|| {
+            std::env::var("GITHUB_REF_NAME")
+                .ok()
+                .filter(|branch| !branch.trim().is_empty())
+        })
 }
 
 fn find_candidate_docs(repo_root: &Path) -> Vec<String> {
@@ -934,6 +960,19 @@ fn dedup_sorted(values: &mut Vec<String>) {
     values.dedup();
 }
 
+fn source_tree_hash(tracked_files: &[String]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for file in tracked_files {
+        for byte in file.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
+}
+
 fn timestamp_string() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -969,6 +1008,19 @@ mod tests {
         assert_eq!(outputs.manifest.org.as_deref(), Some("greenticai"));
         assert_eq!(outputs.repo_index.repo_id, "greenticai/demo-repo");
         assert_eq!(outputs.fingerprints.head_sha, "abc123");
+        let metadata = outputs.repo_index.metadata.as_ref().unwrap();
+        assert_eq!(metadata.repo_id, "greenticai/demo-repo");
+        assert_eq!(metadata.branch.as_deref(), Some("main"));
+        assert_eq!(metadata.commit_sha.as_deref(), Some("abc123"));
+        assert_eq!(metadata.index_schema_version, "gca.repo_index.v1");
+        assert_eq!(metadata.tool_version, env!("CARGO_PKG_VERSION"));
+        assert!(
+            metadata
+                .source_tree_hash
+                .as_deref()
+                .unwrap()
+                .starts_with("fnv64:")
+        );
         assert!(!outputs.repo_index.concept_graph.is_empty());
         assert!(
             outputs

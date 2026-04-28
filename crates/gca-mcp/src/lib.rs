@@ -141,6 +141,15 @@ pub fn tool_definitions() -> Vec<McpTool> {
         ),
         tool("sync_indexes", "Refresh local index cache metadata."),
         tool("show_catalog", "Show catalog metadata."),
+        tool("gca.search", "Search indexed knowledge."),
+        tool("gca.agent_context", "Build task context for an agent."),
+        tool("gca.find_owner", "Find owner candidates for a concept."),
+        tool(
+            "gca.required_validations",
+            "List validations implied by a task.",
+        ),
+        tool("gca.recent_updates", "Find recent updates for a task."),
+        tool("gca.branch_status", "Report indexed branch status."),
     ]
 }
 
@@ -183,6 +192,24 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
             .map_err(|error| error.to_string())
         }
         "search_code" => search_value(context.repo_index, SearchMode::Code, &arguments),
+        "gca.search" => {
+            let Some(query) = arguments.get("query").and_then(Value::as_str) else {
+                return error_response(id, "missing `query` argument");
+            };
+            let mode = match arguments.get("mode").and_then(Value::as_str) {
+                Some("code") => SearchMode::Code,
+                Some("instruction") | None => SearchMode::Instruction,
+                Some("concept") => SearchMode::Concept,
+                Some("reuse") => SearchMode::Reuse,
+                Some("course") => SearchMode::Course,
+                Some("update") => SearchMode::Update,
+                Some(other) => {
+                    return error_response(id, &format!("unsupported search mode: {other}"));
+                }
+            };
+            serde_json::to_value(search_repo_index(context.repo_index, mode, query))
+                .map_err(|error| error.to_string())
+        }
         "search_instructions" => {
             search_value(context.repo_index, SearchMode::Instruction, &arguments)
         }
@@ -263,6 +290,43 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
             serde_json::to_value(locate_owner(context.policy, concept_id))
                 .map_err(|error| error.to_string())
         }
+        "gca.agent_context" => {
+            let Some(task) = arguments.get("task").and_then(Value::as_str) else {
+                return error_response(id, "missing `task` argument");
+            };
+            serde_json::to_value(serde_json::json!({
+                "task": task,
+                "channel": arguments.get("channel").and_then(Value::as_str).unwrap_or("develop"),
+                "relevant_repos": [{
+                    "repo_id": context.repo_index.repo_id,
+                    "branch": context.repo_index.metadata.as_ref().and_then(|metadata| metadata.branch.as_deref()),
+                    "source": "local",
+                    "matched": []
+                }],
+                "owner_candidates": [],
+                "required_validations": required_validations(context.policy, task),
+                "recent_updates": recommend_updates_for_task(context.repo_index, task),
+                "tutorials": recommend_training_courses(context.repo_index, task, None),
+                "warnings": []
+            }))
+            .map_err(|error| error.to_string())
+        }
+        "gca.find_owner" => {
+            let Some(concept_id) = arguments
+                .get("concept")
+                .or_else(|| arguments.get("concept_id"))
+                .and_then(Value::as_str)
+            else {
+                return error_response(id, "missing `concept` argument");
+            };
+            serde_json::to_value(serde_json::json!({
+                "concept": concept_id,
+                "channel": arguments.get("channel").and_then(Value::as_str).unwrap_or("develop"),
+                "owner_candidates": locate_owner(context.policy, concept_id).into_iter().collect::<Vec<_>>(),
+                "warnings": []
+            }))
+            .map_err(|error| error.to_string())
+        }
         "locate_extension_point" => {
             search_value(context.repo_index, SearchMode::Instruction, &arguments)
         }
@@ -279,6 +343,30 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
             };
             serde_json::to_value(required_validations(context.policy, task))
                 .map_err(|error| error.to_string())
+        }
+        "gca.required_validations" => {
+            let Some(task) = arguments.get("task").and_then(Value::as_str) else {
+                return error_response(id, "missing `task` argument");
+            };
+            serde_json::to_value(serde_json::json!({
+                "task": task,
+                "channel": arguments.get("channel").and_then(Value::as_str).unwrap_or("develop"),
+                "validations": required_validations(context.policy, task),
+                "warnings": []
+            }))
+            .map_err(|error| error.to_string())
+        }
+        "gca.recent_updates" => {
+            let Some(task) = arguments.get("task").and_then(Value::as_str) else {
+                return error_response(id, "missing `task` argument");
+            };
+            serde_json::to_value(serde_json::json!({
+                "task": task,
+                "channel": arguments.get("channel").and_then(Value::as_str).unwrap_or("develop"),
+                "updates": recommend_updates_for_task(context.repo_index, task),
+                "warnings": []
+            }))
+            .map_err(|error| error.to_string())
         }
         "impact_analysis" => {
             let Some(symbol) = arguments.get("symbol").and_then(Value::as_str) else {
@@ -316,6 +404,12 @@ pub fn dispatch_request(context: &DispatchContext<'_>, request: McpRequest) -> M
         .map_err(|error| error.to_string()),
         "show_catalog" => serde_json::to_value(serde_json::json!({
             "repos": context.remote_repos
+        }))
+        .map_err(|error| error.to_string()),
+        "gca.branch_status" => serde_json::to_value(serde_json::json!({
+            "ok": true,
+            "repos": context.remote_repos,
+            "freshness_warning": context.freshness_warning
         }))
         .map_err(|error| error.to_string()),
         other => return error_response(id, &format!("unknown tool: {other}")),
@@ -529,8 +623,8 @@ fn tool(name: &str, description: &str) -> McpTool {
 #[cfg(test)]
 mod tests {
     use super::{
-        DispatchContext, McpRequest, detect_changes, dispatch_request, impact_analysis,
-        plan_change, server_snapshot, tool_definitions,
+        DispatchContext, McpRequest, RemoteRepoInfo, detect_changes, dispatch_request,
+        impact_analysis, plan_change, server_snapshot, tool_definitions,
     };
     use gca_core::{
         ConceptDescriptor, FreshnessStatus, KnowledgeScope, LifecyclePhase, RepoAgentManifest,
@@ -553,8 +647,15 @@ mod tests {
             snapshot.freshness_warning.as_deref(),
             Some("index is stale")
         );
-        assert_eq!(tool_definitions().len(), 25);
+        assert_eq!(tool_definitions().len(), 31);
         assert!(snapshot.tools.iter().any(|tool| tool.name == "search_all"));
+        assert!(snapshot.tools.iter().any(|tool| tool.name == "gca.search"));
+        assert!(
+            snapshot
+                .tools
+                .iter()
+                .any(|tool| tool.name == "gca.agent_context")
+        );
         assert!(
             snapshot
                 .tools
@@ -635,6 +736,62 @@ mod tests {
     }
 
     #[test]
+    fn request_dispatch_accepts_stable_gca_tool_aliases() {
+        let repo_index = demo_repo_index();
+        let policy = demo_policy();
+        let context = DispatchContext {
+            repo_index: &repo_index,
+            policy: &policy,
+            freshness_warning: None,
+            remote_repos: vec![RemoteRepoInfo {
+                repo_name: "greenticai/demo-repo".to_string(),
+                tags: vec!["develop".to_string()],
+            }],
+        };
+
+        let search = dispatch_request(
+            &context,
+            McpRequest {
+                id: Some("search".to_string()),
+                tool: "gca.search".to_string(),
+                arguments: serde_json::json!({ "query": "wizard", "mode": "concept" }),
+            },
+        );
+        assert!(search.ok);
+        assert!(search.result.unwrap().to_string().contains("\"wizard\""));
+
+        let context_response = dispatch_request(
+            &context,
+            McpRequest {
+                id: Some("context".to_string()),
+                tool: "gca.agent_context".to_string(),
+                arguments: serde_json::json!({ "task": "update wizard setup schema" }),
+            },
+        );
+        assert!(context_response.ok);
+        let context_json = context_response.result.unwrap().to_string();
+        assert!(context_json.contains("\"channel\":\"develop\""));
+        assert!(context_json.contains("setup_runtime_schema_change"));
+
+        let branch_status = dispatch_request(
+            &context,
+            McpRequest {
+                id: Some("status".to_string()),
+                tool: "gca.branch_status".to_string(),
+                arguments: serde_json::json!({}),
+            },
+        );
+        assert!(branch_status.ok);
+        assert!(
+            branch_status
+                .result
+                .unwrap()
+                .to_string()
+                .contains("develop")
+        );
+    }
+
+    #[test]
     fn detect_changes_maps_files_to_workflows() {
         let summary = detect_changes(
             &demo_repo_index(),
@@ -659,6 +816,7 @@ mod tests {
             repo_name: "demo-repo".to_string(),
             repo_role: RepoRole::CliLauncher,
             generated_at: "2026-04-15T00:00:00Z".to_string(),
+            metadata: None,
             freshness: FreshnessStatus::Fresh,
             manifest: RepoAgentManifest {
                 version: "v1".to_string(),

@@ -82,12 +82,12 @@ pub struct InstallGithubWorkflowOptions;
 
 #[derive(Debug, Clone)]
 pub struct PackageIndexOptions {
-    pub tag: String,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PublishIndexOptions {
-    pub tag: String,
+    pub tags: Vec<String>,
     pub remote_root: Option<PathBuf>,
 }
 
@@ -95,6 +95,7 @@ pub struct PublishIndexOptions {
 pub struct SyncOptions {
     pub repo_id: Option<String>,
     pub tag: Option<String>,
+    pub channel: Option<String>,
     pub remote_root: Option<PathBuf>,
 }
 
