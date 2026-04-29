@@ -131,3 +131,139 @@ fn result_type_for_kind(kind: &str) -> SearchResultType {
         _ => SearchResultType::Code,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tantivy::doc;
+    use tantivy::schema::{STORED, STRING, Schema, TEXT};
+
+    #[test]
+    fn parses_search_engine_choice() {
+        assert_eq!(
+            SearchEngineChoice::parse("auto"),
+            Ok(SearchEngineChoice::Auto)
+        );
+        assert_eq!(
+            SearchEngineChoice::parse("tantivy"),
+            Ok(SearchEngineChoice::Tantivy)
+        );
+        assert_eq!(
+            SearchEngineChoice::parse("fallback"),
+            Ok(SearchEngineChoice::Fallback)
+        );
+        assert_eq!(
+            SearchEngineChoice::parse("sqlite").expect_err("unsupported engine"),
+            "unsupported search engine: sqlite"
+        );
+    }
+
+    #[test]
+    fn searches_index_filters_by_mode_and_maps_results() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let schema = test_schema();
+        let repo_id = schema.get_field("repo_id").expect("repo_id");
+        let path = schema.get_field("path").expect("path");
+        let kind = schema.get_field("kind").expect("kind");
+        let title = schema.get_field("title").expect("title");
+        let body = schema.get_field("body").expect("body");
+        let concept_ids = schema.get_field("concept_ids").expect("concept_ids");
+        let provenance = schema.get_field("provenance").expect("provenance");
+        let index = Index::create_in_dir(temp.path(), schema).expect("create index");
+        let mut writer = index.writer(50_000_000).expect("writer");
+
+        writer
+            .add_document(doc!(
+                repo_id => "repo-a",
+                path => "src/lib.rs",
+                kind => "module",
+                title => "Search module",
+                body => "needle handles code lookup",
+                concept_ids => "code_search",
+                provenance => "source_stats.modules",
+            ))
+            .expect("add module");
+        writer
+            .add_document(doc!(
+                repo_id => "repo-a",
+                path => "docs/policy.md",
+                kind => "instruction",
+                title => "Instruction policy",
+                body => "needle explains the workflow",
+                concept_ids => "agent_policy",
+                provenance => "instruction_graph:policy",
+            ))
+            .expect("add instruction");
+        writer
+            .add_document(doc!(
+                repo_id => "repo-a",
+                path => "",
+                kind => "concept",
+                title => "Needle Concept",
+                body => "concept summary",
+                concept_ids => "needle_concept",
+                provenance => "concept_graph:needle",
+            ))
+            .expect("add concept");
+        writer.commit().expect("commit");
+
+        let code = search_tantivy_index(temp.path(), SearchMode::Code, " needle ")
+            .expect("code search succeeds");
+        assert_eq!(code.mode, SearchMode::Code);
+        assert_eq!(code.query, "needle");
+        assert_eq!(code.results.len(), 1);
+        assert_eq!(code.results[0].id, "module:src/lib.rs");
+        assert_eq!(code.results[0].result_type, SearchResultType::Code);
+        assert_eq!(code.results[0].snippet, "needle handles code lookup");
+        assert_eq!(code.results[0].freshness, FreshnessStatus::Fresh);
+
+        let instruction = search_tantivy_index(temp.path(), SearchMode::Instruction, "needle")
+            .expect("instruction search succeeds");
+        assert_eq!(instruction.results.len(), 1);
+        assert_eq!(instruction.results[0].id, "instruction:docs/policy.md");
+        assert_eq!(
+            instruction.results[0].result_type,
+            SearchResultType::Instruction
+        );
+        assert_eq!(
+            instruction.results[0].provenance,
+            "instruction_graph:policy"
+        );
+
+        let concept = search_tantivy_index(temp.path(), SearchMode::Concept, "needle_concept")
+            .expect("concept search succeeds");
+        assert_eq!(concept.results.len(), 1);
+        assert_eq!(concept.results[0].id, "concept:Needle Concept");
+        assert_eq!(concept.results[0].locator, "");
+        assert_eq!(concept.results[0].result_type, SearchResultType::Concept);
+    }
+
+    #[test]
+    fn reports_open_and_parse_errors() {
+        let missing = tempfile::tempdir().expect("tempdir").path().join("missing");
+        assert!(search_tantivy_index(&missing, SearchMode::Code, "needle").is_err());
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let index = Index::create_in_dir(temp.path(), test_schema()).expect("create index");
+        index
+            .writer::<TantivyDocument>(50_000_000)
+            .expect("writer")
+            .commit()
+            .expect("commit");
+        let error = search_tantivy_index(temp.path(), SearchMode::Code, "\"unterminated")
+            .expect_err("query parse fails");
+        assert!(!error.is_empty());
+    }
+
+    fn test_schema() -> Schema {
+        let mut builder = Schema::builder();
+        builder.add_text_field("repo_id", STRING | STORED);
+        builder.add_text_field("path", STRING | STORED);
+        builder.add_text_field("kind", STRING | STORED);
+        builder.add_text_field("title", TEXT | STORED);
+        builder.add_text_field("body", TEXT | STORED);
+        builder.add_text_field("concept_ids", TEXT | STORED);
+        builder.add_text_field("provenance", STRING | STORED);
+        builder.build()
+    }
+}
