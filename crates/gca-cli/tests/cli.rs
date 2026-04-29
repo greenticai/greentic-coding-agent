@@ -2398,6 +2398,14 @@ fn create_demo_repo(repo_root: &Path) {
     )
     .unwrap();
     fs::write(
+        repo_root.join(".git").join("config"),
+        format!(
+            "[remote \"origin\"]\n\turl = https://github.com/unknown/{}.git\n",
+            repo_root.file_name().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+    fs::write(
         repo_root
             .join(".git")
             .join("refs")
