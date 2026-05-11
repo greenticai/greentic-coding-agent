@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "gca-agent-files"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-core",
  "gca-query",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "gca-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "criterion",
  "serde",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "gca-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-agent-files",
  "gca-core",
@@ -646,14 +646,14 @@ dependencies = [
 
 [[package]]
 name = "gca-greentic"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-core",
 ]
 
 [[package]]
 name = "gca-index"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-core",
  "gca-greentic",
@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "gca-mcp"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-core",
  "gca-query",
@@ -679,7 +679,7 @@ dependencies = [
 
 [[package]]
 name = "gca-oci"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-agent-files",
  "gca-core",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "gca-query"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "gca-core",
  "serde",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "greentic-coding-agent"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "assert_cmd",
  "clap",
