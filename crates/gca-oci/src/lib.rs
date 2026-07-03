@@ -1301,14 +1301,8 @@ jobs:
       - name: Package index
         run: ./target/release/greentic-coding-agent package-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --format json | tee .greentic-agent-package.json
 
-      - name: Publish index to GHCR when refresh is needed
-        shell: bash
-        run: |
-          if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
-            ./target/release/greentic-coding-agent publish-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
-          else
-            echo '{"published": false, "reason": "refresh not required"}' | tee .greentic-agent-publish.json
-          fi
+      - name: Publish index to GHCR
+        run: ./target/release/greentic-coding-agent publish-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
 
       - name: Upload summaries
         uses: actions/upload-artifact@v4

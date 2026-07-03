@@ -4,6 +4,8 @@ use serde_json::json;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::thread;
@@ -1223,6 +1225,121 @@ fn ghcr_backend_reports_missing_oras_without_leaking_token() {
 }
 
 #[test]
+#[cfg(unix)]
+fn ghcr_repo_sync_caches_index_and_rebuilds_merged_search() {
+    let temp_root = unique_temp_dir("gca-cli-ghcr-sync");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    let fake_bin = temp_root.join("bin");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::create_dir_all(&fake_bin).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["analyze"]);
+    analyze.assert().success();
+
+    let mut package = Command::cargo_bin("greentic-coding-agent").unwrap();
+    package
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["package-index", "--tag", "latest"]);
+    package.assert().success();
+
+    let package_dir = repo_root
+        .join(".greentic-agent")
+        .join("oci")
+        .join("unknown")
+        .join("demo-repo")
+        .join("latest");
+    let fake_oras = fake_bin.join("oras");
+    fs::write(
+        &fake_oras,
+        format!(
+            r#"#!/bin/sh
+cmd="$1"
+shift
+if [ "$cmd" = "login" ]; then
+  cat >/dev/null
+  exit 0
+fi
+if [ "$cmd" = "pull" ]; then
+  shift
+  out=""
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "-o" ]; then
+      shift
+      out="$1"
+    fi
+    shift
+  done
+  /bin/mkdir -p "$out"
+  /bin/cp -R "{}"/. "$out"/
+  exit 0
+fi
+exit 0
+"#,
+            package_dir.display()
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&fake_oras).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_oras, permissions).unwrap();
+
+    let mut sync = Command::cargo_bin("greentic-coding-agent").unwrap();
+    sync.current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .env("PATH", &fake_bin)
+        .args([
+            "sync",
+            "--backend",
+            "ghcr",
+            "--repo",
+            "unknown/demo-repo",
+            "--format",
+            "json",
+        ]);
+    sync.assert().success().stdout(
+        predicate::str::contains("\"downloaded\"")
+            .and(predicate::str::contains("unknown/demo-repo/latest")),
+    );
+
+    let state =
+        fs::read_to_string(fake_home.join(".greentic-agent").join("sync-state.json")).unwrap();
+    assert!(state.contains("\"repo_id\": \"unknown/demo-repo\""));
+    assert!(state.contains("\"branch\": \"main\""));
+    assert!(
+        fake_home
+            .join(".greentic-agent")
+            .join("tantivy")
+            .join("merged")
+            .exists()
+    );
+
+    let mut search = Command::cargo_bin("greentic-coding-agent").unwrap();
+    search
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args([
+            "search",
+            "--scope",
+            "merged",
+            "--mode",
+            "instruction",
+            "wizard",
+            "--format",
+            "json",
+        ]);
+    search.assert().success().stdout(predicate::str::contains(
+        "\"repo_id\": \"unknown/demo-repo\"",
+    ));
+}
+
+#[test]
 fn catalog_membership_commands_manage_editable_catalog() {
     let temp_root = unique_temp_dir("gca-cli-catalog-membership");
     let fake_home = temp_root.join("home");
@@ -1631,13 +1748,12 @@ fn install_github_workflow_writes_expected_file() {
     )
     .unwrap();
     assert!(workflow.contains("check-refresh"));
-    assert!(workflow.contains("publish-index"));
+    assert!(workflow.contains("install-github-workflow --publish-ghcr was not used"));
+    assert!(!workflow.contains("publish-index --tag"));
     assert!(workflow.contains("- develop"));
     assert!(workflow.contains("sha-${{ github.sha }}"));
     assert!(workflow.contains("packages: write"));
     assert!(workflow.contains("oras-project/setup-oras"));
-    assert!(workflow.contains("--backend ghcr"));
-    assert!(workflow.contains("--token-env GHCR_TOKEN"));
     assert!(!workflow.contains("local_fixture"));
 }
 
@@ -1671,6 +1787,9 @@ fn install_github_workflow_generates_tenant_and_catalog_variants() {
     .unwrap();
     assert!(index_workflow.contains("GREENTIC_AGENT_TENANT: meeza"));
     assert!(index_workflow.contains("TENANT_GHCR_TOKEN"));
+    assert!(index_workflow.contains("publish-index --tag"));
+    assert!(index_workflow.contains("--backend ghcr"));
+    assert!(index_workflow.contains("--token-env GHCR_TOKEN"));
     assert!(!index_workflow.contains("super-secret-token"));
 
     let mut catalog = Command::cargo_bin("greentic-coding-agent").unwrap();

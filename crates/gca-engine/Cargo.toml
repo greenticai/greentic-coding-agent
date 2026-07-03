@@ -9,16 +9,16 @@ documentation.workspace = true
 publish = false
 
 [dependencies]
-gca-agent-files = { path = "../gca-agent-files" }
-gca-core = { path = "../gca-core" }
-gca-greentic = { path = "../gca-greentic" }
-gca-index = { path = "../gca-index" }
-gca-mcp = { path = "../gca-mcp" }
-gca-oci = { path = "../gca-oci" }
-gca-query = { path = "../gca-query" }
+gca-agent-files.workspace = true
+gca-core.workspace = true
+gca-greentic.workspace = true
+gca-index.workspace = true
+gca-mcp.workspace = true
+gca-oci.workspace = true
+gca-query.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = "3.13"
+tempfile.workspace = true
