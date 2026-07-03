@@ -581,6 +581,14 @@ impl CodingAgentService {
         if !path.exists() {
             return Ok(self.analyze(AnalyzeOptions)?.repo_index);
         }
+        let refresh =
+            gca_oci::check_refresh(&self.repo_root()).map_err(|source| EngineError::Io {
+                path: path.display().to_string(),
+                source,
+            })?;
+        if refresh.needs_refresh {
+            return Ok(self.analyze(AnalyzeOptions)?.repo_index);
+        }
         read_json(&path)
     }
 

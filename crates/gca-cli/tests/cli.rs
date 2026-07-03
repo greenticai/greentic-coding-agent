@@ -412,6 +412,41 @@ fn courses_command_lists_authored_training_courses() {
 }
 
 #[test]
+fn courses_command_refreshes_stale_index_after_training_course_added() {
+    let temp_root = unique_temp_dir("gca-cli-courses-refresh");
+    let repo_root = temp_root.join("demo-repo");
+    let fake_home = temp_root.join("home");
+    create_demo_repo(&repo_root);
+    fs::create_dir_all(&fake_home).unwrap();
+    let course_path = repo_root
+        .join(".greentic")
+        .join("training")
+        .join("create-demo-component.course.v1.json");
+    let course_raw = fs::read_to_string(&course_path).unwrap();
+    fs::remove_file(&course_path).unwrap();
+
+    let mut analyze = Command::cargo_bin("greentic-coding-agent").unwrap();
+    analyze
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .arg("analyze");
+    analyze.assert().success();
+
+    fs::write(&course_path, course_raw).unwrap();
+
+    let mut courses = Command::cargo_bin("greentic-coding-agent").unwrap();
+    courses
+        .current_dir(&repo_root)
+        .env("HOME", &fake_home)
+        .args(["courses", "--format", "json"]);
+
+    courses.assert().success().stdout(
+        predicate::str::contains("\"id\": \"create_demo_component\"")
+            .and(predicate::str::contains("\"audience\"")),
+    );
+}
+
+#[test]
 fn course_recommend_and_train_use_task_matching() {
     let temp_root = unique_temp_dir("gca-cli-course-recommend");
     let repo_root = temp_root.join("demo-repo");
