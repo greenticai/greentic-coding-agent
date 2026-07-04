@@ -9,4 +9,4 @@ documentation.workspace = true
 publish = false
 
 [dependencies]
-gca-core = { path = "../gca-core" }
+gca-core.workspace = true

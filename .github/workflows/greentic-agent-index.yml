@@ -46,6 +46,7 @@ jobs:
       - name: Publish index to GHCR
         run: ./target/release/greentic-coding-agent publish-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
 
+
       - name: Upload summaries
         uses: actions/upload-artifact@v4
         with:
