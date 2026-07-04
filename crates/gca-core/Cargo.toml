@@ -14,8 +14,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-criterion = "0.5"
-tempfile = "3.13"
+criterion.workspace = true
+tempfile.workspace = true
 
 [[bench]]
 name = "perf"
