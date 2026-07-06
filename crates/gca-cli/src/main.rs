@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use clap::{Parser, Subcommand};
 use gca_core::{
     KnowledgeUpdateDescriptor as EngineKnowledgeUpdateDescriptor,
@@ -374,7 +372,7 @@ enum Commands {
         #[arg(long, default_value = "markdown")]
         format: String,
     },
-    /// Reserved placeholder for future plan-generation behavior.
+    /// Plan generation is not available in this build.
     Plan,
     /// Emit the MCP-style tool surface or dispatch a single request file.
     Serve {
@@ -1039,10 +1037,7 @@ fn main() {
             eprintln!("describe currently supports only --here");
             2
         }
-        Some(other) => {
-            println!("{}", placeholder_message(&other));
-            0
-        }
+        Some(Commands::Plan) => run_plan(),
         None => {
             println!("Run `greentic-coding-agent --help` to see available commands.");
             0
@@ -1054,56 +1049,11 @@ fn main() {
     }
 }
 
-fn placeholder_message(command: &Commands) -> &'static str {
-    match command {
-        Commands::Analyze { .. } => "analyze is scaffolded but not implemented yet",
-        Commands::BootstrapInstructions { .. } => {
-            "bootstrap-instructions is scaffolded but not implemented yet"
-        }
-        Commands::CommandList { .. } => "commands is scaffolded but not implemented yet",
-        Commands::Courses { .. } => "courses is scaffolded but not implemented yet",
-        Commands::Course { .. } => "course is scaffolded but not implemented yet",
-        Commands::Train { .. } => "train is scaffolded but not implemented yet",
-        Commands::Updates { .. } => "updates is scaffolded but not implemented yet",
-        Commands::Catalog { .. } => "catalog is scaffolded but not implemented yet",
-        Commands::Org { .. } => "org is scaffolded but not implemented yet",
-        Commands::Agent { .. } => "agent is scaffolded but not implemented yet",
-        Commands::Concepts { .. } => "concepts is scaffolded but not implemented yet",
-        Commands::Workflows { .. } => "workflows is scaffolded but not implemented yet",
-        Commands::Search { .. } => "search is scaffolded but not implemented yet",
-        Commands::LocateOwner { .. } => "locate-owner is scaffolded but not implemented yet",
-        Commands::RequiredValidations { .. } => {
-            "required-validations is scaffolded but not implemented yet"
-        }
-        Commands::PackageIndex { .. } => "package-index is scaffolded but not implemented yet",
-        Commands::PublishIndex { .. } => "publish-index is scaffolded but not implemented yet",
-        Commands::ListRemoteRepos { .. } => {
-            "list-remote-repos is scaffolded but not implemented yet"
-        }
-        Commands::ShowCatalog { .. } => "show-catalog is scaffolded but not implemented yet",
-        Commands::CheckRefresh { .. } => "check-refresh is scaffolded but not implemented yet",
-        Commands::WatchIndexes { .. } => "watch-indexes is scaffolded but not implemented yet",
-        Commands::Watch { .. } => "watch is scaffolded but not implemented yet",
-        Commands::Daemon { .. } => "daemon is scaffolded but not implemented yet",
-        Commands::Impact { .. } => "impact is scaffolded but not implemented yet",
-        Commands::DetectChanges { .. } => "detect-changes is scaffolded but not implemented yet",
-        Commands::ValidatePlan { .. } => "validate-plan is scaffolded but not implemented yet",
-        Commands::Plan => "plan is scaffolded but not implemented yet",
-        Commands::Serve { .. } => "serve is scaffolded but not implemented yet",
-        Commands::GenerateAgentFiles { .. } => {
-            "generate-agent-files is scaffolded but not implemented yet"
-        }
-        Commands::InstallGithubWorkflow { .. } => {
-            "install-github-workflow is scaffolded but not implemented yet"
-        }
-        Commands::Sync { .. } => "sync is scaffolded but not implemented yet",
-        Commands::Init { .. } => "init is scaffolded but not implemented yet",
-        Commands::Status { .. } => "status is scaffolded but not implemented yet",
-        Commands::RebuildMergedIndex { .. } => {
-            "rebuild-merged-index is scaffolded but not implemented yet"
-        }
-        Commands::Describe { .. } => "describe is scaffolded but not implemented yet",
-    }
+fn run_plan() -> i32 {
+    eprintln!(
+        "plan generation is not implemented; use `validate-plan <plan_path>` for existing plan files"
+    );
+    2
 }
 
 fn engine_service() -> Result<gca_engine::CodingAgentService, String> {
@@ -2720,6 +2670,19 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
                     format!("ghcr.io/greenticai/indexes/{repo}:{tag}")
                 };
                 oras_pull(&reference, &target, remote_config.auth.as_ref())?;
+                let catalog_repo =
+                    catalog_repo_from_package(&target, repo, tag, remote_config.tenant.as_deref())?;
+                let digest = catalog_repo.digest.clone();
+                let mut state = load_sync_state(&home).unwrap_or_else(empty_sync_state);
+                let entry = sync_cached_index_from_package(
+                    &catalog_repo,
+                    &target,
+                    &indexes_root,
+                    digest,
+                    options.channel.map(ToString::to_string),
+                )?;
+                upsert_synced_repo(&mut state, entry);
+                write_sync_state(&home, &state)?;
                 report.downloaded.push(target.display().to_string());
             }
         }
@@ -2769,7 +2732,7 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
                     &public_target,
                     remote_config.auth.as_ref(),
                 )?;
-                let mut synced = vec![public_target];
+                let mut synced = vec![public_target.clone()];
                 if let (Some(_tenant), Some(tenant_catalog_ref)) =
                     (&remote_config.tenant, &remote_config.tenant_catalog_ref)
                 {
@@ -2786,23 +2749,30 @@ fn execute_sync(options: SyncOptions<'_>) -> Result<SyncReport, String> {
                         synced.push(tenant_target);
                     }
                 }
-                report.downloaded = synced
-                    .into_iter()
-                    .map(|path| path.display().to_string())
-                    .collect();
+                let catalog = load_pulled_catalogs(&public_target, synced.get(1))?;
+                sync_catalog_packages_from_ghcr(
+                    &catalog,
+                    &remote_config,
+                    options,
+                    &cache_root,
+                    &indexes_root,
+                    &home,
+                    &mut report,
+                )?;
+                report
+                    .downloaded
+                    .extend(synced.into_iter().map(|path| path.display().to_string()));
             }
         }
     }
 
-    if remote_config.backend == RemoteBackendKind::LocalFixture {
-        match gca_oci::rebuild_merged_tantivy_index(&home, remote_config.tenant.as_deref()) {
-            Ok(merged) => report.merged_index_path = merged.merged_index_path,
-            Err(error) => {
-                report.failed.push(SyncFailure {
-                    repo_id: "merged-index".to_string(),
-                    error,
-                });
-            }
+    match gca_oci::rebuild_merged_tantivy_index(&home, remote_config.tenant.as_deref()) {
+        Ok(merged) => report.merged_index_path = merged.merged_index_path,
+        Err(error) => {
+            report.failed.push(SyncFailure {
+                repo_id: "merged-index".to_string(),
+                error,
+            });
         }
     }
     Ok(report)
@@ -5026,6 +4996,62 @@ fn tag_from_index_uri(index_uri: &str) -> String {
         .unwrap_or_else(|| "latest".to_string())
 }
 
+fn repo_id_from_index_uri(index_uri: &str) -> Option<String> {
+    let without_tag = index_uri.rsplit_once(':')?.0;
+    let path = without_tag.strip_prefix("ghcr.io/greenticai/indexes/")?;
+    let path = path
+        .strip_prefix("tenants/")
+        .and_then(|rest| rest.split_once('/').map(|(_, repo)| repo))
+        .unwrap_or(path);
+    if path.split('/').count() >= 2 {
+        Some(path.to_string())
+    } else {
+        None
+    }
+}
+
+fn selected_catalog_branch(
+    repo: &CatalogRepo,
+    requested: Option<&str>,
+) -> Option<(String, CatalogBranchEntry)> {
+    if repo.branches.is_empty() {
+        return Some((
+            repo.preferred_branch
+                .clone()
+                .or_else(|| repo.default_branch.clone())
+                .unwrap_or_else(|| repo.latest_tag.clone()),
+            CatalogBranchEntry {
+                index_uri: repo.package_ref.clone(),
+                commit_sha: repo.source_commit.clone(),
+                updated_at: Some(repo.updated_at.clone()).filter(|value| !value.is_empty()),
+                digest: repo.digest.clone(),
+            },
+        ));
+    }
+    if let Some(requested) = requested
+        && let Some(entry) = repo.branches.get(requested)
+    {
+        return Some((requested.to_string(), entry.clone()));
+    }
+    for candidate in [
+        repo.preferred_branch.as_deref(),
+        repo.default_branch.as_deref(),
+        Some(repo.latest_tag.as_str()),
+        Some("latest"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(entry) = repo.branches.get(candidate) {
+            return Some((candidate.to_string(), entry.clone()));
+        }
+    }
+    repo.branches
+        .iter()
+        .next()
+        .map(|(branch, entry)| (branch.clone(), entry.clone()))
+}
+
 fn run_check_refresh(format: &str) -> i32 {
     let format = match OutputFormat::parse(format) {
         Ok(format) => format,
@@ -5536,42 +5562,6 @@ fn run_describe_here(format: &str) -> i32 {
     }
 }
 
-fn print_summary(summary: &DescribeHere, format: OutputFormat) {
-    match format {
-        OutputFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(summary).expect("describe payload should serialize")
-            );
-        }
-        OutputFormat::Markdown => {
-            println!("# Describe Here");
-            println!();
-            println!("- Version: `{}`", summary.version);
-            println!("- Repo root: `{}`", summary.repo_root.display());
-            println!("- Repo ID: `{}`", summary.repo_id);
-            println!("- Repo name: `{}`", summary.repo_name);
-            println!("- Manifest: `{}`", summary.manifest_path.display());
-            println!("- Git detected: `{}`", summary.has_git_dir);
-            if let Some(local_index) = &summary.local_index_path {
-                println!("- Local index: `{}`", local_index.display());
-            }
-            if let Some(repo_role) = summary.repo_role {
-                println!("- Repo role: `{}`", repo_role.as_str());
-            }
-            if let Some(concept_count) = summary.concept_count {
-                println!("- Concepts indexed: `{concept_count}`");
-            }
-            if let Some(workflow_count) = summary.workflow_count {
-                println!("- Workflows indexed: `{workflow_count}`");
-            }
-            if let Some(instruction_count) = summary.instruction_count {
-                println!("- Instruction docs indexed: `{instruction_count}`");
-            }
-        }
-    }
-}
-
 fn print_analyze_summary(outputs: &AnalyzeOutputs, format: OutputFormat) {
     match format {
         OutputFormat::Json => {
@@ -5699,48 +5689,6 @@ fn print_search_response(response: &SearchResponse) {
         println!("  provenance: {}", result.provenance);
         println!("  freshness: {}", result.freshness.as_str());
         println!("  snippet: {}", result.snippet);
-    }
-}
-
-fn print_owner_lookup(concept: &str, owner: Option<&OwnerLookup>) {
-    println!("# Locate Owner");
-    println!();
-    println!("- Concept: `{concept}`");
-    match owner {
-        Some(owner) => {
-            println!("- Owner repo: `{}`", owner.owner_repo);
-            println!("- Rationale: {}", owner.rationale);
-            if !owner.forbidden_locations.is_empty() {
-                println!(
-                    "- Forbidden locations: {}",
-                    owner.forbidden_locations.join(", ")
-                );
-            }
-            if !owner.required_validations.is_empty() {
-                println!(
-                    "- Required validations: {}",
-                    owner.required_validations.join(", ")
-                );
-            }
-        }
-        None => println!("- No owner policy found."),
-    }
-}
-
-fn print_required_validations(response: &RequiredValidationsResponse) {
-    println!("# Required Validations");
-    println!();
-    println!("- Task: `{}`", response.task);
-    println!("- Matches: `{}`", response.validations.len());
-    if response.validations.is_empty() {
-        println!("- No validation guidance found.");
-        return;
-    }
-    for validation in &response.validations {
-        println!("- `{}`: {}", validation.id, validation.summary);
-        if !validation.command_groups.is_empty() {
-            println!("  commands: {}", validation.command_groups.join(", "));
-        }
     }
 }
 
@@ -6767,11 +6715,17 @@ struct SyncState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SyncedRepoState {
     repo_id: String,
+    #[serde(default)]
+    channel: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
     tenant: Option<String>,
     visibility: IndexVisibility,
     package_ref: String,
     digest: Option<String>,
     source_commit: Option<String>,
+    #[serde(default)]
+    indexed_at: Option<String>,
     downloaded_at: String,
     local_index_path: PathBuf,
     local_tantivy_path: Option<PathBuf>,
@@ -6792,13 +6746,6 @@ struct SyncReport {
 struct SyncFailure {
     repo_id: String,
     error: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct MergedIndexReport {
-    merged_index_path: PathBuf,
-    repos_indexed: usize,
-    documents_indexed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6878,16 +6825,6 @@ struct ChangeDetection {
     likely_workflows: Vec<String>,
     suggested_validations: Vec<ValidationDescriptor>,
     freshness_warning: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct PlanValidation {
-    plan_path: String,
-    task_summary: String,
-    owner_hints: Vec<OwnerLookup>,
-    required_validations: Vec<ValidationDescriptor>,
-    freshness_warning: Option<String>,
-    issues: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -7006,21 +6943,6 @@ struct AnalyzeOutputs {
     fingerprints_path: PathBuf,
     registry_path: PathBuf,
     tantivy_report: Option<TantivyBuildReport>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct DescribeHere {
-    version: String,
-    repo_root: PathBuf,
-    repo_id: String,
-    repo_name: String,
-    manifest_path: PathBuf,
-    has_git_dir: bool,
-    local_index_path: Option<PathBuf>,
-    repo_role: Option<RepoRole>,
-    concept_count: Option<usize>,
-    workflow_count: Option<usize>,
-    instruction_count: Option<usize>,
 }
 
 fn builtin_concepts() -> Vec<ConceptDescriptor> {
@@ -7410,30 +7332,6 @@ fn render_generated_files(repo_index: &RepoIndex) -> Vec<GeneratedFile> {
     ]
 }
 
-fn write_generated_files(
-    repo_root: &Path,
-    files: &[GeneratedFile],
-    write_root: bool,
-) -> Result<Vec<PathBuf>, std::io::Error> {
-    let generated_dir = repo_root.join(LOCAL_INDEX_DIR).join("generated");
-    fs::create_dir_all(&generated_dir)?;
-
-    let mut written = Vec::new();
-    for file in files {
-        let generated_path = generated_dir.join(&file.file_name);
-        fs::write(&generated_path, &file.content)?;
-        written.push(generated_path);
-
-        if write_root {
-            let root_path = repo_root.join(&file.file_name);
-            fs::write(&root_path, &file.content)?;
-            written.push(root_path);
-        }
-    }
-
-    Ok(written)
-}
-
 fn package_index_layout(
     repo_root: &Path,
     repo_index: &RepoIndex,
@@ -7615,55 +7513,6 @@ fn list_remote_repos(remote_root: &Path) -> Result<Vec<RemoteRepo>, std::io::Err
     Ok(repos)
 }
 
-fn build_catalog(remote_root: &Path) -> Result<Catalog, std::io::Error> {
-    let repos = list_remote_repos(remote_root)?;
-    let mut catalog_repos = Vec::new();
-    for repo in repos {
-        let Some(latest_tag) = repo.tags.last().cloned() else {
-            continue;
-        };
-        let repo_index = load_repo_index_from_path(
-            &remote_root
-                .join(&repo.repo_id)
-                .join(&latest_tag)
-                .join("artifacts")
-                .join("repo-index.json"),
-        )?;
-        catalog_repos.push(CatalogRepo {
-            repo_id: repo.repo_id.clone(),
-            repo_name: repo.repo_name,
-            repo_role: repo_index.repo_role,
-            latest_tag: latest_tag.clone(),
-            package_ref: format!(
-                "ghcr.io/greenticai/indexes/{}:{}",
-                repo_index.repo_id, latest_tag
-            ),
-            updated_at: repo_index.generated_at.clone(),
-            default_branch: repo_index
-                .metadata
-                .as_ref()
-                .and_then(|metadata| metadata.branch.clone()),
-            preferred_branch: None,
-            branches: catalog_branches_for_repo_index(&repo_index, &repo.repo_id, &latest_tag),
-            visibility: IndexVisibility::Public,
-            tenant: None,
-            required_auth: None,
-            digest: None,
-            source_commit: None,
-            enabled: true,
-        });
-    }
-    catalog_repos.sort_by(|left, right| left.repo_id.cmp(&right.repo_id));
-    Ok(Catalog {
-        version: SCHEMA_VERSION_V1.to_string(),
-        generated_at: timestamp_string(),
-        catalog_id: None,
-        default_channel: None,
-        repos: catalog_repos,
-        change_log: Vec::new(),
-    })
-}
-
 fn rebuild_catalog_from_remote(
     remote_root: &Path,
     org: &str,
@@ -7772,43 +7621,58 @@ fn rebuild_catalog_from_remote(
     })
 }
 
-fn load_published_catalog(remote_root: &Path) -> Result<Option<Catalog>, std::io::Error> {
-    let catalog_path = remote_root
-        .join("catalogs")
-        .join("public")
-        .join("catalog.json");
-    if !catalog_path.exists() {
-        return Ok(None);
+fn load_pulled_catalogs(
+    public_target: &Path,
+    tenant_target: Option<&PathBuf>,
+) -> Result<Catalog, String> {
+    let mut public_catalog = load_catalog_file(&public_target.join("catalog.json"))?;
+    normalize_catalog(&mut public_catalog);
+    if let Some(tenant_target) = tenant_target {
+        let mut tenant_catalog = load_catalog_file(&tenant_target.join("catalog.json"))?;
+        normalize_catalog(&mut tenant_catalog);
+        return Ok(merge_catalogs(public_catalog, tenant_catalog));
     }
-    let raw = fs::read_to_string(catalog_path)?;
-    let mut catalog: Catalog = serde_json::from_str(&raw)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    normalize_catalog(&mut catalog);
-    Ok(Some(catalog))
+    Ok(public_catalog)
 }
 
-fn sync_catalog_with_state(
-    remote_root: &Path,
+fn load_catalog_file(path: &Path) -> Result<Catalog, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn merge_catalogs(public_catalog: Catalog, tenant_catalog: Catalog) -> Catalog {
+    let mut repos = BTreeMap::new();
+    let mut change_log = public_catalog.change_log;
+    let generated_at = tenant_catalog.generated_at.clone();
+    for repo in public_catalog.repos {
+        repos.insert(repo.repo_id.clone(), repo);
+    }
+    change_log.extend(tenant_catalog.change_log);
+    for repo in tenant_catalog.repos {
+        repos.insert(repo.repo_id.clone(), repo);
+    }
+    Catalog {
+        version: public_catalog.version,
+        generated_at,
+        catalog_id: public_catalog.catalog_id,
+        default_channel: public_catalog.default_channel,
+        repos: repos.into_values().collect(),
+        change_log,
+    }
+}
+
+fn sync_catalog_packages_from_ghcr(
+    catalog: &Catalog,
+    remote_config: &RemoteConfig,
+    options: SyncOptions<'_>,
     cache_root: &Path,
     indexes_root: &Path,
     home: &Path,
-    options: SyncOptions<'_>,
-) -> Result<SyncReport, String> {
-    let catalog = match load_published_catalog(remote_root).map_err(|error| error.to_string())? {
-        Some(catalog) => catalog,
-        None => build_catalog(remote_root).map_err(|error| error.to_string())?,
-    };
+    report: &mut SyncReport,
+) -> Result<(), String> {
     let mut state = load_sync_state(home).unwrap_or_else(empty_sync_state);
-    let mut report = SyncReport {
-        channel: options.channel.map(ToString::to_string),
-        public_catalog: Some(DEFAULT_PUBLIC_CATALOG_REF.to_string()),
-        tenant_catalog: options.tenant.map(default_tenant_catalog_ref),
-        downloaded: Vec::new(),
-        skipped: Vec::new(),
-        failed: Vec::new(),
-        merged_index_path: merged_tantivy_path(home),
-    };
-
     for repo in &catalog.repos {
         if !repo.enabled {
             if options.prune_disabled {
@@ -7821,49 +7685,72 @@ fn sync_catalog_with_state(
             continue;
         }
 
-        let source = remote_root
-            .join(repo_id_path(&repo.repo_id))
-            .join(&repo.latest_tag);
-        let legacy_target = cache_root
-            .join(repo_id_path(&repo.repo_id))
-            .join(&repo.latest_tag);
-        let digest = repo
-            .digest
-            .clone()
-            .or_else(|| file_digest_hex(&source.join("artifacts").join("repo-index.json")).ok());
+        let Some((branch, branch_entry)) = selected_catalog_branch(repo, options.channel) else {
+            report.skipped.push(repo.repo_id.clone());
+            continue;
+        };
+        let tag = tag_from_index_uri(&branch_entry.index_uri);
+        let package_repo_id =
+            repo_id_from_index_uri(&branch_entry.index_uri).unwrap_or_else(|| repo.repo_id.clone());
+        let target = cache_root.join(repo_id_path(&package_repo_id)).join(&tag);
+        let mut selected_repo = repo.clone();
+        selected_repo.latest_tag = tag;
+        selected_repo.package_ref = branch_entry.index_uri;
+        selected_repo.preferred_branch = Some(branch.clone());
+        selected_repo.source_commit = branch_entry
+            .commit_sha
+            .or_else(|| selected_repo.source_commit.clone());
+        selected_repo.digest = branch_entry.digest.or_else(|| selected_repo.digest.clone());
+        selected_repo.updated_at = branch_entry
+            .updated_at
+            .unwrap_or_else(|| selected_repo.updated_at.clone());
+
         let unchanged = state.repos.iter().any(|entry| {
-            entry.repo_id == repo.repo_id
-                && entry.tenant == repo.tenant
-                && entry.digest == digest
-                && entry.source_commit == repo.source_commit
+            entry.repo_id == selected_repo.repo_id
+                && entry.branch.as_deref() == Some(branch.as_str())
+                && entry.tenant == selected_repo.tenant
+                && entry.digest == selected_repo.digest
+                && entry.source_commit == selected_repo.source_commit
                 && entry.local_index_path.join("repo-index.json").exists()
         });
         if unchanged {
-            report.skipped.push(repo.repo_id.clone());
+            report.skipped.push(selected_repo.repo_id.clone());
             continue;
         }
 
-        if let Err(error) = copy_dir_all(&source, &legacy_target) {
+        if let Err(error) = oras_pull(
+            &selected_repo.package_ref,
+            &target,
+            remote_config.auth.as_ref(),
+        ) {
             report.failed.push(SyncFailure {
-                repo_id: repo.repo_id.clone(),
-                error: error.to_string(),
+                repo_id: selected_repo.repo_id.clone(),
+                error,
             });
             continue;
         }
-        match sync_cached_index_from_package(repo, &source, indexes_root, digest) {
+        let digest = selected_repo
+            .digest
+            .clone()
+            .or_else(|| file_digest_hex(&target.join("artifacts").join("repo-index.json")).ok());
+        match sync_cached_index_from_package(
+            &selected_repo,
+            &target,
+            indexes_root,
+            digest,
+            options.channel.map(ToString::to_string),
+        ) {
             Ok(entry) => {
                 upsert_synced_repo(&mut state, entry);
-                report.downloaded.push(legacy_target.display().to_string());
+                report.downloaded.push(target.display().to_string());
             }
             Err(error) => report.failed.push(SyncFailure {
-                repo_id: repo.repo_id.clone(),
+                repo_id: selected_repo.repo_id.clone(),
                 error,
             }),
         }
     }
-
-    write_sync_state(home, &state)?;
-    Ok(report)
+    write_sync_state(home, &state)
 }
 
 fn sync_options_include_repo(options: SyncOptions<'_>, repo: &CatalogRepo) -> bool {
@@ -7956,6 +7843,7 @@ fn sync_cached_index_from_package(
     package_dir: &Path,
     indexes_root: &Path,
     digest: Option<String>,
+    channel: Option<String>,
 ) -> Result<SyncedRepoState, String> {
     let target = local_index_path_for(indexes_root, repo);
     fs::create_dir_all(&target)
@@ -7989,11 +7877,14 @@ fn sync_cached_index_from_package(
     )?;
     Ok(SyncedRepoState {
         repo_id: repo.repo_id.clone(),
+        channel,
+        branch: selected_catalog_branch(repo, None).map(|(branch, _)| branch),
         tenant: repo.tenant.clone(),
         visibility: repo.visibility,
         package_ref: repo.package_ref.clone(),
         digest,
         source_commit: repo.source_commit.clone(),
+        indexed_at: Some(repo.updated_at.clone()).filter(|value| !value.is_empty()),
         downloaded_at: timestamp_string(),
         local_index_path: target,
         local_tantivy_path: Some(tantivy_path),
@@ -8001,14 +7892,19 @@ fn sync_cached_index_from_package(
 }
 
 fn local_index_path_for(indexes_root: &Path, repo: &CatalogRepo) -> PathBuf {
+    let branch = selected_catalog_branch(repo, None)
+        .map(|(branch, _)| branch)
+        .unwrap_or_else(|| repo.latest_tag.clone());
     match repo.visibility {
         IndexVisibility::Tenant | IndexVisibility::Private => indexes_root
             .join("tenants")
             .join(repo.tenant.as_deref().unwrap_or("default"))
-            .join(repo_id_path(&repo.repo_id)),
+            .join(repo_id_path(&repo.repo_id))
+            .join(branch),
         IndexVisibility::Public => indexes_root
             .join("public")
-            .join(repo_id_path(&repo.repo_id)),
+            .join(repo_id_path(&repo.repo_id))
+            .join(branch),
     }
 }
 
@@ -8037,6 +7933,8 @@ fn write_sync_state(home: &Path, state: &SyncState) -> Result<(), String> {
         left.repo_id
             .cmp(&right.repo_id)
             .then(left.tenant.cmp(&right.tenant))
+            .then(left.branch.cmp(&right.branch))
+            .then(left.channel.cmp(&right.channel))
     });
     let raw = serde_json::to_string_pretty(&state).expect("sync state should serialize as json");
     fs::write(&path, format!("{raw}\n"))
@@ -8061,9 +7959,12 @@ fn catalog_fingerprint(home: &Path) -> String {
 }
 
 fn upsert_synced_repo(state: &mut SyncState, entry: SyncedRepoState) {
-    state
-        .repos
-        .retain(|repo| repo.repo_id != entry.repo_id || repo.tenant != entry.tenant);
+    state.repos.retain(|repo| {
+        repo.repo_id != entry.repo_id
+            || repo.tenant != entry.tenant
+            || repo.branch != entry.branch
+            || repo.channel != entry.channel
+    });
     state.repos.push(entry);
 }
 
@@ -8077,57 +7978,6 @@ fn prune_synced_repo(state: &mut SyncState, repo: &CatalogRepo) {
         }
     }
     state.repos = retained;
-}
-
-fn rebuild_merged_index(home: &Path, tenant: Option<&str>) -> Result<MergedIndexReport, String> {
-    let cached = load_cached_repo_indexes(home, tenant)?;
-    let merged_path = merged_tantivy_path(home);
-    let next_path = home
-        .join(".greentic-agent")
-        .join("tantivy")
-        .join("merged.next");
-    let previous_path = home
-        .join(".greentic-agent")
-        .join("tantivy")
-        .join("merged.previous");
-    let build = build_merged_tantivy_index(&cached, &next_path)?;
-    open_tantivy_index(&next_path)?;
-    fs::write(
-        next_path.join("greentic-meta.json"),
-        serde_json::to_string_pretty(&serde_json::json!({
-            "version": SCHEMA_VERSION_V1,
-            "generated_at": timestamp_string(),
-            "repos": cached.iter().map(|entry| &entry.state.repo_id).collect::<Vec<_>>(),
-            "documents_indexed": build.documents_indexed,
-        }))
-        .expect("merged metadata should serialize"),
-    )
-    .map_err(|error| format!("failed to write merged metadata: {error}"))?;
-    if previous_path.exists() {
-        fs::remove_dir_all(&previous_path)
-            .map_err(|error| format!("failed to remove previous merged index: {error}"))?;
-    }
-    if merged_path.exists() {
-        fs::rename(&merged_path, &previous_path)
-            .map_err(|error| format!("failed to archive previous merged index: {error}"))?;
-    }
-    if let Err(error) = fs::rename(&next_path, &merged_path) {
-        if previous_path.exists() && !merged_path.exists() {
-            let _ = fs::rename(&previous_path, &merged_path);
-        }
-        return Err(format!("failed to activate merged index: {error}"));
-    }
-    Ok(MergedIndexReport {
-        merged_index_path: merged_path,
-        repos_indexed: cached.len(),
-        documents_indexed: build.documents_indexed,
-    })
-}
-
-fn open_tantivy_index(index_dir: &Path) -> Result<(), String> {
-    tantivy::Index::open_in_dir(index_dir)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
 }
 
 fn load_cached_repo_indexes(
@@ -8191,38 +8041,58 @@ fn recover_cached_indexes_under(
     visibility: IndexVisibility,
     state: &mut SyncState,
 ) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for org_entry in entries.flatten() {
-        let org_path = org_entry.path();
-        if !org_path.is_dir() {
-            continue;
-        }
-        let Ok(repo_entries) = fs::read_dir(&org_path) else {
-            continue;
-        };
-        for repo_entry in repo_entries.flatten() {
-            let repo_path = repo_entry.path();
-            let repo_index_path = repo_path.join("repo-index.json");
-            if !repo_index_path.exists() {
-                continue;
-            }
-            let Ok(repo_index) = load_repo_index_from_path(&repo_index_path) else {
-                continue;
-            };
+    recover_cached_index_dirs(root, tenant, visibility, state);
+}
+
+fn recover_cached_index_dirs(
+    root: &Path,
+    tenant: Option<String>,
+    visibility: IndexVisibility,
+    state: &mut SyncState,
+) {
+    let repo_index_path = root.join("repo-index.json");
+    if repo_index_path.exists() {
+        if let Ok(repo_index) = load_repo_index_from_path(&repo_index_path) {
             let digest = file_digest_hex(&repo_index_path).ok();
+            let branch = repo_index
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.branch.clone())
+                .or_else(|| {
+                    root.file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                });
             state.repos.push(SyncedRepoState {
                 repo_id: repo_index.repo_id.clone(),
-                tenant: tenant.clone(),
+                channel: branch.clone(),
+                branch,
+                tenant,
                 visibility,
                 package_ref: format!("ghcr.io/greenticai/indexes/{}:latest", repo_index.repo_id),
                 digest,
-                source_commit: None,
+                source_commit: repo_index
+                    .metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.commit_sha.clone()),
+                indexed_at: repo_index
+                    .metadata
+                    .as_ref()
+                    .map(|metadata| metadata.indexed_at.clone()),
                 downloaded_at: timestamp_string(),
-                local_index_path: repo_path.clone(),
-                local_tantivy_path: Some(repo_path.join("tantivy")),
+                local_index_path: root.to_path_buf(),
+                local_tantivy_path: Some(root.join("tantivy")),
             });
+        }
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            recover_cached_index_dirs(&path, tenant.clone(), visibility, state);
         }
     }
 }
@@ -8299,7 +8169,6 @@ fn check_refresh(repo_root: &Path) -> Result<RefreshCheck, std::io::Error> {
 }
 
 fn render_installed_github_workflow(options: WorkflowInstallOptions<'_>) -> String {
-    let _publish_ghcr = options.publish_ghcr;
     let tenant_env = options
         .tenant
         .map(|tenant| {
@@ -8313,6 +8182,15 @@ fn render_installed_github_workflow(options: WorkflowInstallOptions<'_>) -> Stri
         "${{ secrets.TENANT_GHCR_TOKEN || secrets.GITHUB_TOKEN }}"
     } else {
         "${{ secrets.GITHUB_TOKEN }}"
+    };
+    let publish_step = if options.publish_ghcr {
+        r#"      - name: Publish index to GHCR
+        run: ./target/release/greentic-coding-agent publish-index --tag "${{ github.ref_name }}" --tag "sha-${{ github.sha }}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
+"#
+    } else {
+        r#"      - name: Record skipped publish
+        run: echo '{"published": false, "reason": "install-github-workflow --publish-ghcr was not used"}' | tee .greentic-agent-publish.json
+"#
     };
     format!(
         r#"name: Greentic Agent Index
@@ -8360,14 +8238,7 @@ jobs:
       - name: Package index
         run: ./target/release/greentic-coding-agent package-index --tag "${{{{ github.ref_name }}}}" --tag "sha-${{{{ github.sha }}}}" --format json | tee .greentic-agent-package.json
 
-      - name: Publish index to GHCR when refresh is needed
-        shell: bash
-        run: |
-          if ./target/release/greentic-coding-agent check-refresh --format json | grep -q '"needs_refresh": true'; then
-            ./target/release/greentic-coding-agent publish-index --tag "${{{{ github.ref_name }}}}" --tag "sha-${{{{ github.sha }}}}" --backend ghcr --token-env GHCR_TOKEN --format json | tee .greentic-agent-publish.json
-          else
-            echo '{{"published": false, "reason": "refresh not required"}}' | tee .greentic-agent-publish.json
-          fi
+{publish_step}
 
       - name: Upload summaries
         uses: actions/upload-artifact@v4
@@ -8618,23 +8489,6 @@ fn build_local_tantivy_index(
     index_dir: &Path,
 ) -> Result<TantivyBuildReport, String> {
     build_tantivy_index_for_repo(repo_index, index_dir, "", IndexVisibility::Public, "")
-}
-
-fn build_merged_tantivy_index(
-    cached: &[CachedRepoIndex],
-    index_dir: &Path,
-) -> Result<TantivyBuildReport, String> {
-    build_tantivy_index_from_sources(
-        index_dir,
-        cached.iter().map(|entry| {
-            (
-                &entry.repo_index,
-                entry.state.tenant.as_deref().unwrap_or_default(),
-                entry.state.visibility,
-                entry.state.package_ref.as_str(),
-            )
-        }),
-    )
 }
 
 fn build_tantivy_index_for_repo(
@@ -9333,46 +9187,6 @@ fn detect_changes(
     })
 }
 
-fn validate_plan_file(
-    repo_root: &Path,
-    repo_index: &RepoIndex,
-    plan_path: &Path,
-) -> Result<PlanValidation, std::io::Error> {
-    let raw = fs::read_to_string(plan_path)?;
-    let task_summary = extract_plan_summary(&raw);
-    let refresh = check_refresh(repo_root)?;
-    let mut owner_hints = Vec::new();
-    for concept in &repo_index.concept_graph {
-        let concept_phrase = concept.id.replace('_', " ");
-        let lower = task_summary.to_ascii_lowercase();
-        if (lower.contains(&concept.id.to_ascii_lowercase()) || lower.contains(&concept_phrase))
-            && let Some(owner) = locate_owner(&repo_index.reuse, &concept.id)
-        {
-            owner_hints.push(owner);
-        }
-    }
-    owner_hints.sort_by(|left, right| left.concept_id.cmp(&right.concept_id));
-    owner_hints.dedup_by(|left, right| left.concept_id == right.concept_id);
-
-    let validations = required_validations(repo_index, &task_summary).validations;
-    let mut issues = Vec::new();
-    if task_summary.trim().is_empty() {
-        issues.push("plan file did not contain any extractable task text".to_string());
-    }
-    if refresh.needs_refresh {
-        issues.push("local index appears stale relative to the current checkout".to_string());
-    }
-
-    Ok(PlanValidation {
-        plan_path: plan_path.display().to_string(),
-        task_summary,
-        owner_hints,
-        required_validations: validations,
-        freshness_warning: freshness_warning(Some(&refresh)),
-        issues,
-    })
-}
-
 fn mcp_server_snapshot(refresh: Option<&RefreshCheck>) -> McpServerSnapshot {
     McpServerSnapshot {
         protocol: "mcp-lite-v1".to_string(),
@@ -9843,32 +9657,6 @@ fn mcp_tool(name: &str, description: &str) -> McpTool {
     }
 }
 
-fn extract_plan_summary(raw: &str) -> String {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
-        let mut parts = Vec::new();
-        collect_plan_strings(&value, &mut parts);
-        return parts.join(" ");
-    }
-    raw.to_string()
-}
-
-fn collect_plan_strings(value: &serde_json::Value, out: &mut Vec<String>) {
-    match value {
-        serde_json::Value::String(text) => out.push(text.clone()),
-        serde_json::Value::Array(values) => {
-            for value in values {
-                collect_plan_strings(value, out);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for value in map.values() {
-                collect_plan_strings(value, out);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn freshness_warning(refresh: Option<&RefreshCheck>) -> Option<String> {
     refresh.and_then(|refresh| {
         if refresh.needs_refresh {
@@ -10294,51 +10082,6 @@ fn load_optional_fingerprints(path: &Path) -> Result<Option<Fingerprints>, std::
     let parsed = serde_json::from_str(&raw)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     Ok(Some(parsed))
-}
-
-fn describe_here() -> Result<DescribeHere, String> {
-    let current_dir =
-        current_dir().map_err(|error| format!("failed to determine current directory: {error}"))?;
-    let repo_root = find_repo_root(&current_dir).ok_or_else(|| {
-        format!(
-            "failed to detect repository root from {}",
-            current_dir.display()
-        )
-    })?;
-
-    let repo_name = repo_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown-repo")
-        .to_string();
-    let repo_id = detect_repo_id(&repo_root, &repo_name);
-    let local_index_path = repo_root.join(LOCAL_INDEX_DIR).join("repo-index.json");
-    let local_index = if local_index_path.exists() {
-        let raw = fs::read_to_string(&local_index_path)
-            .map_err(|error| format!("failed to read {}: {error}", local_index_path.display()))?;
-        let mut parsed = serde_json::from_str::<RepoIndex>(&raw)
-            .map_err(|error| format!("failed to parse {}: {error}", local_index_path.display()))?;
-        canonicalize_repo_index_identity(&mut parsed);
-        Some(parsed)
-    } else {
-        None
-    };
-
-    Ok(DescribeHere {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        manifest_path: repo_root.join("Cargo.toml"),
-        has_git_dir: repo_root.join(".git").exists(),
-        repo_id,
-        repo_name,
-        repo_root,
-        local_index_path: local_index.as_ref().map(|_| local_index_path),
-        repo_role: local_index.as_ref().map(|index| index.repo_role),
-        concept_count: local_index.as_ref().map(|index| index.concept_graph.len()),
-        workflow_count: local_index.as_ref().map(|index| index.workflow_graph.len()),
-        instruction_count: local_index
-            .as_ref()
-            .map(|index| index.instruction_graph.len()),
-    })
 }
 
 fn load_registry(path: &Path) -> Result<Registry, String> {

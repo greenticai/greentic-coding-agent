@@ -33,15 +33,15 @@ pkg-fmt = "zip"
 
 [dependencies]
 clap.workspace = true
-gca-core = { path = "../gca-core" }
-gca-engine = { path = "../gca-engine" }
-gca-oci = { path = "../gca-oci" }
+gca-core.workspace = true
+gca-engine.workspace = true
+gca-oci.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tantivy.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.1"
-tempfile = "3.13"
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

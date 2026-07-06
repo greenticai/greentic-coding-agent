@@ -21,9 +21,21 @@ homepage = "https://github.com/greenticai/greentic-coding-agent"
 documentation = "https://docs.rs/greentic-coding-agent"
 
 [workspace.dependencies]
+assert_cmd = "2.0"
+criterion = "0.8"
+gca-agent-files = { path = "crates/gca-agent-files" }
+gca-core = { path = "crates/gca-core" }
+gca-engine = { path = "crates/gca-engine" }
+gca-greentic = { path = "crates/gca-greentic" }
+gca-index = { path = "crates/gca-index" }
+gca-mcp = { path = "crates/gca-mcp" }
+gca-oci = { path = "crates/gca-oci" }
+gca-query = { path = "crates/gca-query" }
+predicates = "3.1"
 serde_json = "1.0"
 sha2 = "0.11"
 tantivy = "0.26"
+tempfile = "3.13"
 thiserror = "2.0"
 
 [workspace.dependencies.clap]
